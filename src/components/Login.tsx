@@ -90,8 +90,14 @@ export const Login = ({ onLogin }: LoginProps) => {
           <div className="login-icon-wrapper">
             <ShieldCheck size={32} />
           </div>
-          <h2 className="login-title">SİGORTA TAKİP</h2>
-          <p className="login-subtitle">
+          <h2 className="login-title" style={{ fontSize: '1.4rem', marginTop: '0.5rem' }}>ANADOLU SİGORTA</h2>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 600, marginTop: '0.25rem' }}>
+            Tokat Turhal Acentesi
+          </div>
+          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>
+            Acente Sahibi: Mustafa Bulut
+          </div>
+          <p className="login-subtitle" style={{ marginTop: '0.5rem' }}>
             {view === 'login' ? 'Devam etmek için yönetici girişi yapın' : 'Şifre Sıfırlama Talebi'}
           </p>
         </div>
