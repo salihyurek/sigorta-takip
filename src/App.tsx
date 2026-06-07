@@ -508,7 +508,10 @@ export default function App() {
       <nav className="navbar">
         <div className="brand-container">
           <ShieldCheck size={32} className="brand-icon" />
-          <span className="brand-name">SİGORTA TAKİP</span>
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <span className="brand-name" style={{ lineHeight: '1.2' }}>Anadolu Sigorta</span>
+            <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 500 }}>Turhal Tokat Acentesi - Mustafa Bulut</span>
+          </div>
         </div>
         
         <div className="nav-links">
@@ -596,7 +599,7 @@ export default function App() {
 
       {/* Footer */}
       <footer style={{ textAlign: 'center', padding: '1.5rem', fontSize: '0.8rem', color: 'var(--text-muted)', borderTop: '1px solid var(--border-color)', background: 'rgba(250, 247, 243, 0.95)' }}>
-        Sigorta Takip Otomasyon Paneli &copy; {new Date().getFullYear()} • Şehirlerarası Otobüs Taşımacılığı Sigorta Acentesi Takip Yazılımı
+        Anadolu Sigorta Tokat Turhal Acentesi &copy; {new Date().getFullYear()} • Mustafa Bulut • Otobüs Sigorta Takip Otomasyon Paneli
       </footer>
 
       {/* Add / Edit Form Modal */}
