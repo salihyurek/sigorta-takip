@@ -30,15 +30,6 @@ npm run build
 npm run start
 ```
 
-## İlk Giriş
-
-Varsayılan yönetici hesabı:
-
-- E-posta: `salihyurek004@gmail.com`
-- Şifre: `Ej+D8q6zhg3kRX*`
-
-Giriş yaptıktan sonra `Ayarlar` bölümünden şifreyi değiştirmeniz önerilir.
-
 ## E-posta Bildirimleri
 
 `Ayarlar > E-posta Bildirim Ayarları` bölümünden SMTP bilgilerini girip e-posta bildirimlerini etkinleştirin. Sistem açılışta, her gün 08:00'de ve gün içinde periyodik olarak bugünün tarihinde biten poliçeleri kontrol eder. Aynı poliçe için aynı gün tekrar e-posta göndermez.
