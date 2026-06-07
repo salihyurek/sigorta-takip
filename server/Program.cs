@@ -17,8 +17,8 @@ EnvLoader.Load(workspaceRoot);
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Configure Kestrel to run on http://127.0.0.1:5001 (matching the old Node port)
-builder.WebHost.UseUrls("http://127.0.0.1:5001");
+// Configure Kestrel to run on http://localhost:5001 (matching the old Node port)
+builder.WebHost.UseUrls("http://localhost:5001");
 
 // Add services to the container
 builder.Services.AddControllers();
