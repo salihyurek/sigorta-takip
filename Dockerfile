@@ -7,7 +7,7 @@ COPY . .
 RUN npm run build
 
 # Stage 2: Build the .NET backend
-FROM mcr.microsoft.com/dotnet/sdk:10.0-alpine AS backend-builder
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS backend-builder
 WORKDIR /src
 COPY server/server.csproj ./server/
 RUN dotnet restore server/server.csproj
@@ -15,7 +15,7 @@ COPY server/ ./server/
 RUN dotnet publish server/server.csproj -c Release -o /app/publish
 
 # Stage 3: Final runtime image
-FROM mcr.microsoft.com/dotnet/aspnet:10.0-alpine AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
 # Copy built C# backend to /app/server
 COPY --from=backend-builder /app/publish ./server

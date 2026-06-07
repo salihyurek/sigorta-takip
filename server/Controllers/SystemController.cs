@@ -72,5 +72,12 @@ namespace SigortaTakip.Controllers
                 return StatusCode(500, new { error = "Geri yükleme başarısız oldu", details = ex.Message });
             }
         }
+
+        [HttpGet("/api/health")]
+        [Microsoft.AspNetCore.RateLimiting.DisableRateLimiting]
+        public IActionResult Health()
+        {
+            return Ok(new { status = "ok", timestamp = DateTime.UtcNow });
+        }
     }
 }

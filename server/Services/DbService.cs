@@ -21,8 +21,8 @@ namespace SigortaTakip.Services
             _dbFile = Path.Combine(_dbDir, "db.json");
 
             // Load superadmin config from env, fallback to defaults
-            SuperadminEmail = Environment.GetEnvironmentVariable("SUPERADMIN_EMAIL") ?? "salihyurek004@gmail.com";
-            SuperadminPassword = Environment.GetEnvironmentVariable("SUPERADMIN_PASSWORD") ?? "Ej+D8q6zhg3kRX*";
+            SuperadminEmail = Environment.GetEnvironmentVariable("SUPERADMIN_EMAIL") ?? "admin@sigortatakip.local";
+            SuperadminPassword = Environment.GetEnvironmentVariable("SUPERADMIN_PASSWORD") ?? "Admin123!Change";
 
             InitDb();
         }

@@ -96,7 +96,7 @@ namespace SigortaTakip.Services
         {
             try
             {
-                Console.WriteLine($"[Scheduler] Checking for expiring policies. Current time: {DateTime.UtcNow:yyyy-MM-ddTHH:mm:ssZ}");
+                Console.WriteLine($"[Scheduler] Checking for expiring policies. Current time: {DateTime.Now:yyyy-MM-ddTHH:mm:ss}");
                 
                 var data = _dbService.ReadDb();
                 var settings = data.Settings;

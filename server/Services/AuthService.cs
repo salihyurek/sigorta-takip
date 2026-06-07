@@ -17,15 +17,16 @@ namespace SigortaTakip.Services
     {
         private readonly ConcurrentDictionary<string, SessionData> _sessions = new();
         private readonly TimeSpan _sessionTtl = TimeSpan.FromHours(24);
+        private readonly CancellationTokenSource _cts = new();
 
         public AuthService()
         {
             // Start a background task to clean expired sessions periodically (every hour)
             System.Threading.Tasks.Task.Run(async () =>
             {
-                while (true)
+                while (!_cts.Token.IsCancellationRequested)
                 {
-                    await System.Threading.Tasks.Task.Delay(TimeSpan.FromHours(1));
+                    try { await System.Threading.Tasks.Task.Delay(TimeSpan.FromHours(1), _cts.Token); } catch (TaskCanceledException) { break; }
                     CleanExpiredSessions();
                 }
             });

@@ -10,6 +10,10 @@ function getErrorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
 }
 
+const safeJson = async (res: Response) => {
+  try { return await res.json(); } catch { return null; }
+};
+
 export const ResetPassword = ({ token, onResetComplete }: ResetPasswordProps) => {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -50,8 +54,8 @@ export const ResetPassword = ({ token, onResetComplete }: ResetPasswordProps) =>
         body: JSON.stringify({ token, password })
       });
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Şifre sıfırlama işlemi başarısız.');
+      const data = await safeJson(res);
+      if (!res.ok) throw new Error(data?.error || 'Şifre sıfırlama işlemi başarısız.');
 
       setSuccess('Şifreniz başarıyla güncellendi! Giriş sayfasına yönlendiriliyorsunuz...');
       

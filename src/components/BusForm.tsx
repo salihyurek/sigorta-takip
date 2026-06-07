@@ -62,7 +62,7 @@ export const BusForm = ({ bus, onSave, onClose }: BusFormProps) => {
       const nextYear = new Date();
       nextYear.setFullYear(today.getFullYear() + 1);
       
-      const toDateString = (d: Date) => d.toISOString().split('T')[0];
+      const toDateString = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
       
       const todayStr = toDateString(today);
       const nextYearStr = toDateString(nextYear);

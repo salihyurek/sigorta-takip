@@ -21,16 +21,16 @@ namespace SigortaTakip.Controllers
 
         protected bool IsSuperAdmin => string.Equals(CurrentUserRole, "superadmin", System.StringComparison.OrdinalIgnoreCase);
 
-        protected IActionResult CheckAuth()
+        protected IActionResult? CheckAuth()
         {
             if (CurrentSession == null)
             {
                 return Unauthorized(new { error = "Giriş yapmanız gerekmektedir." });
             }
-            return null!;
+            return null;
         }
 
-        protected IActionResult CheckSuperAdmin()
+        protected IActionResult? CheckSuperAdmin()
         {
             var authCheck = CheckAuth();
             if (authCheck != null) return authCheck;
@@ -39,7 +39,7 @@ namespace SigortaTakip.Controllers
             {
                 return StatusCode(403, new { error = "Bu işlem için yetkiniz bulunmamaktadır." });
             }
-            return null!;
+            return null;
         }
 
         protected string? ValidatePasswordStrength(string password)

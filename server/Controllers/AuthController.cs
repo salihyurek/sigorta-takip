@@ -204,6 +204,7 @@ namespace SigortaTakip.Controllers
         }
 
         [HttpPost("reset-password")]
+        [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting("auth")]
         public IActionResult ResetPassword([FromBody] ResetPasswordRequest req)
         {
             try

@@ -126,5 +126,5 @@ else
     Console.WriteLine("[Server] Development mode: 'dist' folder not found. Relying on frontend dev server proxy.");
 }
 
-Console.WriteLine("[Server] Starting ASP.NET Core Web API on http://127.0.0.1:5001");
+Console.WriteLine($"[Server] Starting ASP.NET Core Web API on port {port}");
 app.Run();

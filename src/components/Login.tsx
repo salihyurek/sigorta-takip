@@ -9,6 +9,10 @@ function getErrorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
 }
 
+const safeJson = async (res: Response) => {
+  try { return await res.json(); } catch { return null; }
+};
+
 export const Login = ({ onLogin }: LoginProps) => {
   const [view, setView] = useState<'login' | 'forgot'>('login');
   
@@ -61,7 +65,7 @@ export const Login = ({ onLogin }: LoginProps) => {
         body: JSON.stringify({ email: forgotEmail.trim() })
       });
 
-      const data = await res.json();
+      const data = await safeJson(res);
       if (!res.ok) throw new Error(data.error || 'Talep gönderilemedi.');
 
       setForgotSuccess(data.message || 'Sıfırlama bağlantısı e-postanıza başarıyla gönderildi.');
@@ -239,7 +243,7 @@ export const Login = ({ onLogin }: LoginProps) => {
         )}
         
         <div style={{ textAlign: 'center', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-          Sigorta Takip Otomasyon © 2026
+          Sigorta Takip Otomasyon © {new Date().getFullYear()}
         </div>
       </div>
     </div>

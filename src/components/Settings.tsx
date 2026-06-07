@@ -23,6 +23,10 @@ function getErrorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
 }
 
+const safeJson = async (res: Response) => {
+  try { return await res.json(); } catch { return null; }
+};
+
 export const Settings = ({
   settings,
   onSaveSettings,
@@ -169,8 +173,8 @@ export const Settings = ({
         body: JSON.stringify({ email: newAdminEmail, password: newAdminPassword })
       });
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Yönetici eklenemedi.');
+      const data = await safeJson(res);
+      if (!res.ok) throw new Error(data?.error || 'Yönetici eklenemedi.');
 
       setUserActionSuccess(`"${newAdminEmail}" başarıyla yönetici olarak yetkilendirildi.`);
       setNewAdminEmail('');
@@ -201,8 +205,8 @@ export const Settings = ({
           }
         });
 
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Yönetici silinemedi.');
+        const data = await safeJson(res);
+        if (!res.ok) throw new Error(data?.error || 'Yönetici silinemedi.');
 
         fetchUsers();
       } catch (err: unknown) {

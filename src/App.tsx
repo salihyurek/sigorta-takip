@@ -211,7 +211,7 @@ export default function App() {
       body: JSON.stringify({ email, password })
     });
     
-    const data = await res.json();
+    const data = await safeJsonParse(res);
     if (!res.ok) {
       throw new Error(data.error || 'Giriş başarısız.');
     }
@@ -567,7 +567,7 @@ export default function App() {
 
       {/* Footer */}
       <footer style={{ textAlign: 'center', padding: '1.5rem', fontSize: '0.8rem', color: 'var(--text-muted)', borderTop: '1px solid var(--border-color)', background: 'rgba(250, 247, 243, 0.95)' }}>
-        Sigorta Takip Otomasyon Paneli &copy; 2026 • Şehirlerarası Otobüs Taşımacılığı Sigorta Acentesi Takip Yazılımı
+        Sigorta Takip Otomasyon Paneli &copy; {new Date().getFullYear()} • Şehirlerarası Otobüs Taşımacılığı Sigorta Acentesi Takip Yazılımı
       </footer>
 
       {/* Add / Edit Form Modal */}

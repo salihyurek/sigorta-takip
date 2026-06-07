@@ -25,11 +25,6 @@ namespace SigortaTakip.Services
                 EnableSsl = settings.SmtpPort == 465 || settings.SmtpPort == 587
             };
 
-            // Do not fail on invalid certificates (rejectUnauthorized: false in Node)
-#pragma warning disable SYSLIB0014
-            ServicePointManager.ServerCertificateValidationCallback = (sender, certificate, chain, sslPolicyErrors) => true;
-#pragma warning restore SYSLIB0014
-
             return client;
         }
 
