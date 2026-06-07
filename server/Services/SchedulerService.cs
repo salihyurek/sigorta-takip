@@ -150,7 +150,14 @@ namespace SigortaTakip.Services
 
         public async Task<int> CheckAllExpiriesAsync()
         {
-            await _runLock.WaitAsync();
+            // Bounded wait so a slow/stuck run can't make callers (the scheduled tick or a
+            // manual trigger) queue up indefinitely. If another check already holds the lock,
+            // skip — it does the work, and the threshold dedup makes a concurrent run a no-op.
+            if (!await _runLock.WaitAsync(TimeSpan.FromSeconds(30)))
+            {
+                Console.WriteLine("[Scheduler] Another expiry check is already running; skipping this trigger.");
+                return 0;
+            }
             try
             {
                 var now = _time.Now;
@@ -228,7 +235,7 @@ namespace SigortaTakip.Services
                 // we notified for — if it was renewed meanwhile, its notifications were reset.
                 if (sent.Count > 0)
                 {
-                    _dbService.Update(fresh =>
+                    var persisted = _dbService.Update(fresh =>
                     {
                         foreach (var s in sent)
                         {
@@ -243,7 +250,9 @@ namespace SigortaTakip.Services
                         }
                         return true;
                     });
-                    Console.WriteLine("[Scheduler] Database updated with notification timestamps.");
+                    Console.WriteLine(persisted
+                        ? "[Scheduler] Database updated with notification timestamps."
+                        : "[Scheduler] WARNING: could not persist notification timestamps; reminders may resend next run.");
                 }
 
                 Console.WriteLine($"[Scheduler] Check complete. Sent {emailsSent} email(s).");

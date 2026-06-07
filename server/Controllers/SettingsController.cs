@@ -1,5 +1,4 @@
 using System;
-using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using SigortaTakip.Models;
@@ -126,9 +125,6 @@ namespace SigortaTakip.Controllers
             }
         }
 
-        private static readonly Regex EmailRegex =
-            new(@"^[^@\s]+@[^@\s]+\.[^@\s]+$", RegexOptions.Compiled);
-
         /// <summary>
         /// Server-side guard so a bad config can't be persisted (the client's required=
         /// attributes are advisory only). Port must be a valid TCP port; when email is
@@ -149,8 +145,8 @@ namespace SigortaTakip.Controllers
             if (string.IsNullOrWhiteSpace(s.SenderEmail)) return "E-posta etkinken gönderen e-posta adresi zorunludur.";
             if (string.IsNullOrWhiteSpace(s.ReceiverEmail)) return "E-posta etkinken alıcı e-posta adresi zorunludur.";
 
-            if (!EmailRegex.IsMatch(s.SenderEmail.Trim())) return "Gönderen e-posta adresi geçersiz.";
-            if (!EmailRegex.IsMatch(s.ReceiverEmail.Trim())) return "Alıcı e-posta adresi geçersiz.";
+            if (!IsValidEmail(s.SenderEmail)) return "Gönderen e-posta adresi geçersiz.";
+            if (!IsValidEmail(s.ReceiverEmail)) return "Alıcı e-posta adresi geçersiz.";
 
             return null;
         }

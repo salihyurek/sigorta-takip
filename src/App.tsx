@@ -216,7 +216,9 @@ export default function App() {
     fetch('/api/config')
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (data && typeof data.soonThresholdDays === 'number' && data.soonThresholdDays > 0) {
+        // >= 0: REMINDER_DAYS="0" (expiry-day only) is a valid config meaning "no advance
+        // warning window", so honor 0; only reject negatives / NaN.
+        if (data && typeof data.soonThresholdDays === 'number' && data.soonThresholdDays >= 0) {
           setSoonThreshold(data.soonThresholdDays);
         }
       })

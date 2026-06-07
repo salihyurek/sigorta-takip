@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Mvc;
 using SigortaTakip.Models;
@@ -55,11 +56,20 @@ namespace SigortaTakip.Controllers
             return null;
         }
 
-        protected string? ValidatePasswordStrength(string password)
+        // BCrypt only considers the first 72 bytes of the input, so anything longer is
+        // silently truncated (two long passwords sharing a 72-byte prefix would match).
+        // Reject overly long passwords instead of hashing a truncated value.
+        protected const int MaxPasswordBytes = 72;
+
+        internal static string? ValidatePasswordStrength(string password)
         {
             if (string.IsNullOrEmpty(password) || password.Length < 8)
             {
                 return "Şifre en az 8 karakter uzunluğunda olmalıdır.";
+            }
+            if (Encoding.UTF8.GetByteCount(password) > MaxPasswordBytes)
+            {
+                return "Şifre çok uzun (en fazla 72 karakter olmalıdır).";
             }
             if (!password.Any(char.IsUpper))
             {
@@ -75,6 +85,13 @@ namespace SigortaTakip.Controllers
             }
             return null;
         }
+
+        private static readonly Regex EmailRegex =
+            new(@"^[^@\s]+@[^@\s]+\.[^@\s]+$", RegexOptions.Compiled);
+
+        /// <summary>Basic shape check so obviously malformed addresses can't be stored.</summary>
+        internal static bool IsValidEmail(string? email) =>
+            !string.IsNullOrWhiteSpace(email) && EmailRegex.IsMatch(email.Trim());
 
         internal static bool IsValidDate(string dateStr)
         {

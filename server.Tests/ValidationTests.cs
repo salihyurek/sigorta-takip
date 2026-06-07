@@ -73,5 +73,44 @@ namespace SigortaTakip.Tests
         {
             Assert.Equal(expected, BaseApiController.IsValidDate(input));
         }
+
+        [Fact]
+        public void ValidatePasswordStrength_AcceptsAStrongPassword()
+        {
+            Assert.Null(BaseApiController.ValidatePasswordStrength("Sifre123"));
+        }
+
+        [Theory]
+        [InlineData("Ab1")]        // too short
+        [InlineData("sifre123")]   // no uppercase
+        [InlineData("SIFRE123")]   // no lowercase
+        [InlineData("SifreABC")]   // no digit
+        public void ValidatePasswordStrength_RejectsWeakPasswords(string password)
+        {
+            Assert.NotNull(BaseApiController.ValidatePasswordStrength(password));
+        }
+
+        [Fact]
+        public void ValidatePasswordStrength_RejectsPasswordsOver72Bytes()
+        {
+            // 72 bytes is the BCrypt limit; longer must be rejected, not silently truncated.
+            var ok72 = "Aa1" + new string('x', 69);   // exactly 72 ASCII bytes
+            var tooLong = "Aa1" + new string('x', 70); // 73 bytes
+            Assert.Null(BaseApiController.ValidatePasswordStrength(ok72));
+            Assert.NotNull(BaseApiController.ValidatePasswordStrength(tooLong));
+        }
+
+        [Theory]
+        [InlineData("user@example.com", true)]
+        [InlineData("a.b-c@sub.domain.co", true)]
+        [InlineData("no-at-sign", false)]
+        [InlineData("no@domain", false)]   // no dot after @
+        [InlineData("two @spaces.com", false)]
+        [InlineData("", false)]
+        [InlineData(null, false)]
+        public void IsValidEmail_ChecksBasicShape(string? email, bool expected)
+        {
+            Assert.Equal(expected, BaseApiController.IsValidEmail(email));
+        }
     }
 }

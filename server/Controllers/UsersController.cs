@@ -69,6 +69,10 @@ namespace SigortaTakip.Controllers
                 {
                     return BadRequest(new { error = "E-posta adresi çok uzun." });
                 }
+                if (!IsValidEmail(req.Email))
+                {
+                    return BadRequest(new { error = "Geçersiz e-posta adresi." });
+                }
 
                 var role = string.IsNullOrWhiteSpace(req.Role) ? "viewer" : req.Role.Trim().ToLowerInvariant();
                 if (!AllowedRoles.Contains(role))

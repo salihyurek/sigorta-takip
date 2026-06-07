@@ -105,7 +105,10 @@ namespace SigortaTakip.Services
                 DatabaseData parsed;
                 try
                 {
-                    parsed = JsonSerializer.Deserialize<DatabaseData>(File.ReadAllText(_dbFile)) ?? new DatabaseData();
+                    // Use the shared decrypt-on-read path. Reading the raw file here (without
+                    // decrypting SmtpPass) and then WriteDb-ing it on a migration would double-
+                    // encrypt the SMTP password ("enc:v1:" + Protect("enc:v1:...")) and corrupt it.
+                    parsed = ReadDbCore();
                 }
                 catch
                 {

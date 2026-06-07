@@ -25,4 +25,10 @@
     <ProjectReference Include="../server/server.csproj" />
   </ItemGroup>
 
+  <!-- Needed to construct DbService in tests (IDataProtectionProvider lives in the
+       ASP.NET Core shared framework). -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
 </Project>
