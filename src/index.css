@@ -371,6 +371,13 @@ body {
   border-color: rgba(139, 90, 60, 0.2);
 }
 
+.btn-secondary.active {
+  background: rgba(139, 90, 60, 0.12);
+  border-color: var(--primary);
+  color: var(--primary);
+  font-weight: 600;
+}
+
 .btn-danger-outline {
   background: transparent;
   color: var(--danger);
@@ -1139,5 +1146,30 @@ body {
 @media (max-width: 480px) {
   .metrics-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+/* Advanced Filters Panel */
+.advanced-filter-panel {
+  background: rgba(139, 90, 60, 0.03);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 1.25rem;
+  margin-bottom: 1.5rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+  align-items: flex-end;
+  animation: slide-down 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes slide-down {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
