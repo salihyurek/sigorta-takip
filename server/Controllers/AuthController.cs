@@ -50,7 +50,8 @@ namespace SigortaTakip.Controllers
             }
             catch (Exception ex)
             {
-                return StatusCode(500, new { error = "Giriş işlemi sırasında hata oluştu", details = ex.Message });
+                Console.WriteLine($"[Auth] Login failed: {ex}");
+                return StatusCode(500, new { error = "Giriş işlemi sırasında hata oluştu." });
             }
         }
 
@@ -120,14 +121,16 @@ namespace SigortaTakip.Controllers
                 user.Password = Auth.HashPassword(req.NewPassword);
                 Db.WriteDb(data);
 
-                // Invalidate all other sessions for this user
-                Auth.DeleteAllSessionsForUser(user.Email);
+                // Invalidate the user's other sessions but keep the current one alive,
+                // so changing your own password doesn't immediately log you out.
+                Auth.DeleteAllSessionsForUser(user.Email, CurrentToken);
 
                 return Ok(new { success = true, message = "Şifreniz başarıyla güncellendi." });
             }
             catch (Exception ex)
             {
-                return StatusCode(500, new { error = "Şifre güncellenirken hata oluştu", details = ex.Message });
+                Console.WriteLine($"[Auth] ChangePassword failed: {ex}");
+                return StatusCode(500, new { error = "Şifre güncellenirken hata oluştu." });
             }
         }
 
@@ -147,53 +150,60 @@ namespace SigortaTakip.Controllers
                     return BadRequest(new { error = "E-posta adresi gereklidir." });
                 }
 
+                // Always return the same generic response regardless of whether the
+                // email exists or whether SMTP is configured, so this endpoint can't
+                // be used to enumerate registered accounts.
+                var successMessage = "Eğer bu e-posta adresi sistemde kayıtlıysa, şifre sıfırlama bağlantısı gönderilecektir.";
+
                 var data = Db.ReadDb();
                 var user = data.Users.FirstOrDefault(u => string.Equals(u.Email.Trim(), req.Email.Trim(), StringComparison.OrdinalIgnoreCase));
 
-                var successMessage = "Eğer bu e-posta adresi sistemde kayıtlıysa, şifre sıfırlama bağlantısı gönderilecektir.";
-
-                if (user == null)
+                if (user != null)
                 {
-                    // Don't reveal email existence
-                    return Ok(new { success = true, message = successMessage });
-                }
-
-                var settings = data.Settings;
-                if (settings == null || string.IsNullOrWhiteSpace(settings.SmtpHost) || string.IsNullOrWhiteSpace(settings.SmtpUser))
-                {
-                    return BadRequest(new { error = "Sistem e-posta (SMTP) ayarları henüz yapılmamış veya eksik. Şifre sıfırlama e-postası gönderilemiyor. Lütfen sistem yöneticiniz ile iletişime geçin." });
-                }
-
-                // Generate reset token
-                byte[] randomBytes = new byte[20];
-                RandomNumberGenerator.Fill(randomBytes);
-                var resetToken = Convert.ToHexString(randomBytes).ToLowerInvariant();
-                var resetTokenExpiry = DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeMilliseconds();
-
-                user.ResetToken = resetToken;
-                user.ResetTokenExpiry = resetTokenExpiry;
-                Db.WriteDb(data);
-
-                // Try to get origin header or fallback
-                string? origin = Request.Headers["Origin"];
-                if (string.IsNullOrEmpty(origin))
-                {
-                    origin = Request.Headers["Referer"];
-                    if (!string.IsNullOrEmpty(origin))
+                    var settings = data.Settings;
+                    if (settings == null || string.IsNullOrWhiteSpace(settings.SmtpHost) || string.IsNullOrWhiteSpace(settings.SmtpUser))
                     {
-                        var uri = new Uri(origin);
-                        origin = $"{uri.Scheme}://{uri.Authority}";
+                        // Log for the admin, but do not reveal anything to the caller.
+                        Console.WriteLine("[Auth] Password reset requested but SMTP is not configured; skipping email.");
+                    }
+                    else
+                    {
+                        byte[] randomBytes = new byte[20];
+                        RandomNumberGenerator.Fill(randomBytes);
+                        var resetToken = Convert.ToHexString(randomBytes).ToLowerInvariant();
+                        user.ResetToken = resetToken;
+                        user.ResetTokenExpiry = DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeMilliseconds();
+                        Db.WriteDb(data);
+
+                        string? origin = Request.Headers["Origin"];
+                        if (string.IsNullOrEmpty(origin))
+                        {
+                            origin = Request.Headers["Referer"];
+                            if (!string.IsNullOrEmpty(origin))
+                            {
+                                var uri = new Uri(origin);
+                                origin = $"{uri.Scheme}://{uri.Authority}";
+                            }
+                        }
+
+                        try
+                        {
+                            await _mailService.SendPasswordResetEmailAsync(user.Email, resetToken, settings, origin);
+                        }
+                        catch (Exception mailEx)
+                        {
+                            Console.WriteLine($"[Auth] Failed to send reset email: {mailEx.Message}");
+                        }
                     }
                 }
-
-                await _mailService.SendPasswordResetEmailAsync(user.Email, resetToken, settings, origin);
 
                 return Ok(new { success = true, message = successMessage });
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Forgot password error: {ex}");
-                return StatusCode(500, new { error = "Şifre sıfırlama işlemi başlatılamadı", details = ex.Message });
+                Console.WriteLine($"[Auth] ForgotPassword failed: {ex}");
+                // Still return generic success to avoid leaking internal state.
+                return Ok(new { success = true, message = "Eğer bu e-posta adresi sistemde kayıtlıysa, şifre sıfırlama bağlantısı gönderilecektir." });
             }
         }
 
@@ -245,7 +255,8 @@ namespace SigortaTakip.Controllers
             }
             catch (Exception ex)
             {
-                return StatusCode(500, new { error = "Şifre yenilenirken hata oluştu", details = ex.Message });
+                Console.WriteLine($"[Auth] ResetPassword failed: {ex}");
+                return StatusCode(500, new { error = "Şifre yenilenirken hata oluştu." });
             }
         }
     }

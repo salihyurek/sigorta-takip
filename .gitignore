@@ -28,8 +28,10 @@ dist-ssr
 .env.local
 .env.*.local
 
-# Database file
-data/db.json
+# Runtime data: database, sessions and data-protection keys.
+# Keep the folder (via .gitkeep) but never commit its contents (secrets/PII).
+data/*
+!data/.gitkeep
 
 # .NET Build Outputs
 server/bin/

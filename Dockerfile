@@ -2,7 +2,8 @@
 FROM node:20-alpine AS frontend-builder
 WORKDIR /app
 COPY package*.json ./
-RUN npm install
+# Use a reproducible install from the lockfile.
+RUN npm ci
 COPY . .
 RUN npm run build
 
@@ -24,6 +25,13 @@ COPY --from=frontend-builder /app/dist ./dist
 
 # Set working directory to /app/server to preserve the sibling directory layout (server/ and dist/)
 WORKDIR /app/server
+
+# Persist application data (db.json, sessions.json, data-protection keys) outside the
+# container's ephemeral layer. On Render attach a persistent disk and set DATA_DIR to
+# its mount path; otherwise this named volume keeps data across container restarts.
+# Without persistence, ALL data (buses, users, settings) is lost on every redeploy.
+ENV DATA_DIR=/app/data
+VOLUME ["/app/data"]
 
 # Expose port (Render will inject PORT environment variable)
 ENV PORT=5001

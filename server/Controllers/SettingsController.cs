@@ -48,7 +48,8 @@ namespace SigortaTakip.Controllers
             }
             catch (Exception ex)
             {
-                return StatusCode(500, new { error = "Failed to read settings", details = ex.Message });
+                Console.WriteLine($"[Settings] GetSettings failed: {ex}");
+                return StatusCode(500, new { error = "Ayarlar okunamadı." });
             }
         }
 
@@ -104,7 +105,8 @@ namespace SigortaTakip.Controllers
             }
             catch (Exception ex)
             {
-                return StatusCode(500, new { error = "Failed to save settings", details = ex.Message });
+                Console.WriteLine($"[Settings] SaveSettings failed: {ex}");
+                return StatusCode(500, new { error = "Ayarlar kaydedilemedi." });
             }
         }
 
@@ -125,12 +127,14 @@ namespace SigortaTakip.Controllers
                 }
 
                 await _mailService.SendTestEmailAsync(testSettings);
-                return Ok(new { success = true, message = "Test email sent successfully!" });
+                return Ok(new { success = true, message = "Test e-postası başarıyla gönderildi!" });
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Test email sending error: {ex}");
-                return StatusCode(500, new { error = "Failed to send test email", details = ex.Message });
+                Console.WriteLine($"[Settings] Test email failed: {ex}");
+                // The SMTP error text is genuinely useful for the admin configuring email,
+                // so surface a trimmed version here (this endpoint is superadmin-only).
+                return StatusCode(500, new { error = "Test e-postası gönderilemedi.", details = ex.Message });
             }
         }
     }

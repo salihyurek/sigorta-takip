@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
+using Microsoft.AspNetCore.DataProtection;
 using SigortaTakip.Models;
 
 namespace SigortaTakip.Services
@@ -11,20 +12,53 @@ namespace SigortaTakip.Services
         private readonly string _dbDir;
         private readonly string _dbFile;
         private readonly object _lock = new();
+        private readonly TimeService _time;
+        private readonly IDataProtector _protector;
 
         public string SuperadminEmail { get; private set; }
-        public string SuperadminPassword { get; private set; }
+        private readonly string _superadminPassword;
 
-        public DbService()
+        // Marks a stored SMTP password as encrypted so we can distinguish it from
+        // legacy plaintext values written before encryption-at-rest was added.
+        private const string EncPrefix = "enc:v1:";
+
+        public DbService(TimeService time, IDataProtectionProvider protectionProvider)
         {
-            _dbDir = Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "..", "data"));
+            _time = time;
+            _protector = protectionProvider.CreateProtector("SigortaTakip.SmtpPassword.v1");
+
+            // Allow overriding where data lives so it can point at a mounted
+            // persistent disk (e.g. Render). Defaults to ../data next to the app.
+            var dataDir = Environment.GetEnvironmentVariable("DATA_DIR");
+            _dbDir = string.IsNullOrWhiteSpace(dataDir)
+                ? Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "..", "data"))
+                : Path.GetFullPath(dataDir);
             _dbFile = Path.Combine(_dbDir, "db.json");
 
-            // Load superadmin config from env, fallback to defaults
-            SuperadminEmail = Environment.GetEnvironmentVariable("SUPERADMIN_EMAIL") ?? "admin@sigortatakip.local";
-            SuperadminPassword = Environment.GetEnvironmentVariable("SUPERADMIN_PASSWORD") ?? "Admin123!Change";
+            var envEmail = Environment.GetEnvironmentVariable("SUPERADMIN_EMAIL");
+            var envPassword = Environment.GetEnvironmentVariable("SUPERADMIN_PASSWORD");
+            var isProduction = string.Equals(
+                Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT"),
+                "Production", StringComparison.OrdinalIgnoreCase);
+
+            if (isProduction && (string.IsNullOrWhiteSpace(envEmail) || string.IsNullOrWhiteSpace(envPassword)))
+            {
+                // Fail hard instead of silently booting with predictable default credentials.
+                throw new InvalidOperationException(
+                    "SUPERADMIN_EMAIL and SUPERADMIN_PASSWORD must be set in Production. " +
+                    "Refusing to start with default credentials.");
+            }
+
+            SuperadminEmail = string.IsNullOrWhiteSpace(envEmail) ? "admin@sigortatakip.local" : envEmail;
+            _superadminPassword = string.IsNullOrWhiteSpace(envPassword) ? "Admin123!Change" : envPassword;
+
+            if (string.IsNullOrWhiteSpace(envEmail) || string.IsNullOrWhiteSpace(envPassword))
+            {
+                Console.WriteLine("[Db] WARNING: SUPERADMIN_EMAIL/PASSWORD not set. Using development defaults.");
+            }
 
             InitDb();
+            EnsureSeededAndMigrated();
         }
 
         private void InitDb()
@@ -48,106 +82,97 @@ namespace SigortaTakip.Services
                             {
                                 Id = "user-superadmin",
                                 Email = SuperadminEmail,
-                                Password = BCrypt.Net.BCrypt.HashPassword(SuperadminPassword, 10),
+                                Password = BCrypt.Net.BCrypt.HashPassword(_superadminPassword, 10),
                                 Role = "superadmin",
                                 ResetToken = null,
                                 ResetTokenExpiry = null
                             }
                         }
                     };
-                    var json = JsonSerializer.Serialize(defaultData, new JsonSerializerOptions { WriteIndented = true });
-                    File.WriteAllText(_dbFile, json);
+                    WriteDb(defaultData);
                 }
             }
         }
 
+        /// <summary>
+        /// One-time migration/seeding run at startup. Kept out of ReadDb so that
+        /// reads are side-effect free (the scheduler reads frequently).
+        /// </summary>
+        private void EnsureSeededAndMigrated()
+        {
+            lock (_lock)
+            {
+                DatabaseData parsed;
+                try
+                {
+                    parsed = JsonSerializer.Deserialize<DatabaseData>(File.ReadAllText(_dbFile)) ?? new DatabaseData();
+                }
+                catch
+                {
+                    return; // ReadDb handles corruption/backup on demand
+                }
+
+                bool migrated = false;
+                parsed.Users ??= new List<User>();
+
+                var superAdminExists = false;
+                foreach (var u in parsed.Users)
+                {
+                    if (string.Equals(u.Email, SuperadminEmail, StringComparison.OrdinalIgnoreCase))
+                    {
+                        superAdminExists = true;
+                        if (u.Role != "superadmin") { u.Role = "superadmin"; migrated = true; }
+                        break;
+                    }
+                }
+
+                if (!superAdminExists)
+                {
+                    parsed.Users.Add(new User
+                    {
+                        Id = "user-superadmin",
+                        Email = SuperadminEmail,
+                        Password = BCrypt.Net.BCrypt.HashPassword(_superadminPassword, 10),
+                        Role = "superadmin",
+                        ResetToken = null,
+                        ResetTokenExpiry = null
+                    });
+                    migrated = true;
+                }
+
+                // Remove the legacy default admin account if it lingers from old versions.
+                int oldAdminIndex = parsed.Users.FindIndex(u =>
+                    string.Equals(u.Email, "admin@sigortatakip.com", StringComparison.OrdinalIgnoreCase));
+                if (oldAdminIndex != -1) { parsed.Users.RemoveAt(oldAdminIndex); migrated = true; }
+
+                foreach (var u in parsed.Users)
+                {
+                    if (string.IsNullOrEmpty(u.Role)) { u.Role = "viewer"; migrated = true; }
+                }
+
+                if (migrated) WriteDb(parsed);
+            }
+        }
+
+        /// <summary>Pure read. Returns settings with the SMTP password decrypted for in-app use.</summary>
         public DatabaseData ReadDb()
         {
             lock (_lock)
             {
-                InitDb();
                 try
                 {
                     var json = File.ReadAllText(_dbFile);
                     var parsed = JsonSerializer.Deserialize<DatabaseData>(json) ?? new DatabaseData();
+                    parsed.Users ??= new List<User>();
+                    parsed.Buses ??= new List<Bus>();
+                    parsed.Settings ??= new Settings();
 
-                    bool migrated = false;
-                    if (parsed.Users == null)
-                    {
-                        parsed.Users = new List<User>();
-                        migrated = true;
-                    }
-
-                    // Check if superadmin is seeded
-                    var superAdminExists = false;
-                    foreach (var u in parsed.Users)
-                    {
-                        if (string.Equals(u.Email, SuperadminEmail, StringComparison.OrdinalIgnoreCase))
-                        {
-                            superAdminExists = true;
-                            if (u.Role != "superadmin")
-                            {
-                                u.Role = "superadmin";
-                                migrated = true;
-                            }
-                            break;
-                        }
-                    }
-
-                    if (!superAdminExists)
-                    {
-                        parsed.Users.Add(new User
-                        {
-                            Id = "user-superadmin",
-                            Email = SuperadminEmail,
-                            Password = BCrypt.Net.BCrypt.HashPassword(SuperadminPassword, 10),
-                            Role = "superadmin",
-                            ResetToken = null,
-                            ResetTokenExpiry = null
-                        });
-                        migrated = true;
-                    }
-
-                    // Remove old default admin account if present
-                    int oldAdminIndex = parsed.Users.FindIndex(u => string.Equals(u.Email, "admin@sigortatakip.com", StringComparison.OrdinalIgnoreCase));
-                    if (oldAdminIndex != -1)
-                    {
-                        parsed.Users.RemoveAt(oldAdminIndex);
-                        migrated = true;
-                    }
-
-                    // Ensure all users have roles & reset fields
-                    foreach (var u in parsed.Users)
-                    {
-                        if (string.Equals(u.Email, SuperadminEmail, StringComparison.OrdinalIgnoreCase))
-                        {
-                            if (u.Role != "superadmin")
-                            {
-                                u.Role = "superadmin";
-                                migrated = true;
-                            }
-                        }
-                        else
-                        {
-                            if (string.IsNullOrEmpty(u.Role))
-                            {
-                                u.Role = "viewer";
-                                migrated = true;
-                            }
-                        }
-                    }
-
-                    if (migrated)
-                    {
-                        WriteDb(parsed);
-                    }
-
+                    parsed.Settings.SmtpPass = DecryptPassword(parsed.Settings.SmtpPass);
                     return parsed;
                 }
                 catch (Exception ex)
                 {
                     Console.WriteLine($"Error reading db.json: {ex.Message}");
-                    // Create backup of corrupted file
                     try
                     {
                         var backupPath = $"{_dbFile}.corrupt.{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}";
@@ -164,13 +189,19 @@ namespace SigortaTakip.Services
             }
         }
 
+        /// <summary>Atomic write. Encrypts the SMTP password at rest without mutating the caller's object.</summary>
         public bool WriteDb(DatabaseData data)
         {
             lock (_lock)
             {
-                InitDb();
+                if (!Directory.Exists(_dbDir)) Directory.CreateDirectory(_dbDir);
+
+                var settings = data.Settings ?? new Settings();
+                var plainPass = settings.SmtpPass;
                 try
                 {
+                    settings.SmtpPass = EncryptPassword(plainPass);
+
                     var tempFile = $"{_dbFile}.tmp";
                     var json = JsonSerializer.Serialize(data, new JsonSerializerOptions { WriteIndented = true });
                     File.WriteAllText(tempFile, json);
@@ -182,16 +213,40 @@ namespace SigortaTakip.Services
                     Console.WriteLine($"Error writing to db.json: {ex.Message}");
                     return false;
                 }
+                finally
+                {
+                    // Restore plaintext so the in-memory object stays usable by the caller.
+                    settings.SmtpPass = plainPass;
+                }
+            }
+        }
+
+        private string EncryptPassword(string? plain)
+        {
+            if (string.IsNullOrEmpty(plain)) return "";
+            try { return EncPrefix + _protector.Protect(plain); }
+            catch { return plain ?? ""; }
+        }
+
+        private string DecryptPassword(string? stored)
+        {
+            if (string.IsNullOrEmpty(stored)) return "";
+            if (!stored.StartsWith(EncPrefix)) return stored; // legacy plaintext
+            try { return _protector.Unprotect(stored.Substring(EncPrefix.Length)); }
+            catch
+            {
+                Console.WriteLine("[Db] WARNING: failed to decrypt stored SMTP password (key mismatch?).");
+                return "";
             }
         }
 
         private List<Bus> GetSampleBuses()
         {
-            var today = DateTime.UtcNow.ToString("yyyy-MM-dd");
-            var in14Days = DateTime.UtcNow.AddDays(14).ToString("yyyy-MM-dd");
-            var in6Days = DateTime.UtcNow.AddDays(6).ToString("yyyy-MM-dd");
-            var activeDate = DateTime.UtcNow.AddMonths(6).ToString("yyyy-MM-dd");
-            var expiredDate = DateTime.UtcNow.AddDays(-17).ToString("yyyy-MM-dd");
+            var today = _time.TodayString;
+            var in14Days = _time.DateString(14);
+            var in6Days = _time.DateString(6);
+            var activeDate = _time.DateString(180);
+            var expiredDate = _time.DateString(-17);
 
             return new List<Bus>
             {

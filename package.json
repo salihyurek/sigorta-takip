@@ -9,6 +9,7 @@
     "server": "dotnet run --project server/server.csproj",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "test": "node --test \"src/**/*.test.ts\"",
     "preview": "vite preview",
     "start": "dotnet run --project server/server.csproj --configuration Release",
     "server-install": "dotnet restore server/server.csproj"

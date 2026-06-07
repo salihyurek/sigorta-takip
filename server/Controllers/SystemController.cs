@@ -32,7 +32,8 @@ namespace SigortaTakip.Controllers
             }
             catch (Exception ex)
             {
-                return StatusCode(500, new { error = "Failed to trigger check", details = ex.Message });
+                Console.WriteLine($"[System] CheckExpiries failed: {ex}");
+                return StatusCode(500, new { error = "Kontrol tetiklenemedi." });
             }
         }
 
@@ -55,11 +56,30 @@ namespace SigortaTakip.Controllers
                     return BadRequest(new { error = "Geçersiz yedek dosyası" });
                 }
 
+                // Validate every restored bus so a malformed backup can't corrupt the db.
+                for (int i = 0; i < req.Buses.Count; i++)
+                {
+                    var b = req.Buses[i];
+                    var error = ValidateBus(b.Plate, b.Brand, b.Operator, b.Policies);
+                    if (error != null)
+                    {
+                        return BadRequest(new { error = $"Yedekteki {i + 1}. araç geçersiz: {error}" });
+                    }
+                }
+
                 var currentData = Db.ReadDb();
+
+                var restoredSettings = req.Settings ?? currentData.Settings;
+                // Backups never contain the real SMTP password (it's masked on export),
+                // so don't let a masked/empty value overwrite the working password.
+                if (restoredSettings.SmtpPass == "********" || string.IsNullOrEmpty(restoredSettings.SmtpPass))
+                {
+                    restoredSettings.SmtpPass = currentData.Settings.SmtpPass;
+                }
 
                 var data = new DatabaseData
                 {
-                    Settings = req.Settings ?? currentData.Settings,
+                    Settings = restoredSettings,
                     Buses = req.Buses,
                     Users = currentData.Users // Preserve users!
                 };
@@ -69,7 +89,8 @@ namespace SigortaTakip.Controllers
             }
             catch (Exception ex)
             {
-                return StatusCode(500, new { error = "Geri yükleme başarısız oldu", details = ex.Message });
+                Console.WriteLine($"[System] Restore failed: {ex}");
+                return StatusCode(500, new { error = "Geri yükleme başarısız oldu." });
             }
         }
 

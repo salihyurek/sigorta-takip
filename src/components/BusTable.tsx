@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { Bus } from '../types';
 import { getPolicyStatus, getDaysRemaining, formatDate } from '../utils/dateHelpers';
-import { Search, Edit2, Trash2, Shield, Calendar, AlertOctagon, SlidersHorizontal } from 'lucide-react';
+import { Search, Edit2, Trash2, Shield, Calendar, AlertOctagon, SlidersHorizontal, ChevronLeft, ChevronRight } from 'lucide-react';
+
+const PAGE_SIZE = 10;
 
 interface BusTableProps {
   buses: Bus[];
@@ -22,6 +24,14 @@ export const BusTable = ({ buses, onEditBus, onDeleteBus, isSuperAdmin = true }:
   const [searchOperator, setSearchOperator] = useState('');
   const [dateRangeStart, setDateRangeStart] = useState('');
   const [dateRangeEnd, setDateRangeEnd] = useState('');
+
+  // Pagination
+  const [page, setPage] = useState(1);
+
+  // Reset to the first page whenever the filters/sort/data change.
+  useEffect(() => {
+    setPage(1);
+  }, [searchTerm, statusFilter, sortBy, searchPlate, searchBrand, searchOperator, dateRangeStart, dateRangeEnd, buses]);
 
   const handleResetFilters = () => {
     setSearchTerm('');
@@ -122,6 +132,13 @@ export const BusTable = ({ buses, onEditBus, onDeleteBus, isSuperAdmin = true }:
     
     return getMinExpiryDays(a) - getMinExpiryDays(b);
   });
+
+  // Pagination math (clamp the page in case the list shrank).
+  const totalPages = Math.max(1, Math.ceil(sortedBuses.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pagedBuses = sortedBuses.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  const firstItem = sortedBuses.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
+  const lastItem = Math.min(currentPage * PAGE_SIZE, sortedBuses.length);
 
   // Render Policy Cell
   const renderPolicyCell = (endDate: string) => {
@@ -315,7 +332,7 @@ export const BusTable = ({ buses, onEditBus, onDeleteBus, isSuperAdmin = true }:
               </tr>
             </thead>
             <tbody>
-              {sortedBuses.map((bus) => (
+              {pagedBuses.map((bus) => (
                 <tr key={bus.id} className="bus-row">
                   <td>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
@@ -358,6 +375,36 @@ export const BusTable = ({ buses, onEditBus, onDeleteBus, isSuperAdmin = true }:
               ))}
             </tbody>
           </table>
+
+          {/* Pagination */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem', flexWrap: 'wrap', gap: '0.75rem', borderTop: '1px solid var(--border-color)' }}>
+            <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+              {sortedBuses.length} araçtan {firstItem}-{lastItem} arası gösteriliyor
+            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <button
+                className="btn-secondary"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={currentPage <= 1}
+                style={{ padding: '0.4rem 0.7rem' }}
+                aria-label="Önceki sayfa"
+              >
+                <ChevronLeft size={16} />
+              </button>
+              <span style={{ fontSize: '0.85rem', color: 'var(--text-primary)', fontWeight: 600, minWidth: '90px', textAlign: 'center' }}>
+                Sayfa {currentPage} / {totalPages}
+              </span>
+              <button
+                className="btn-secondary"
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={currentPage >= totalPages}
+                style={{ padding: '0.4rem 0.7rem' }}
+                aria-label="Sonraki sayfa"
+              >
+                <ChevronRight size={16} />
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

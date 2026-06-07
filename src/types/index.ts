@@ -2,6 +2,7 @@ export interface PolicyDetail {
   startDate: string;
   endDate: string;
   lastEmailedDate: string | null;
+  lastNotifiedThreshold?: number | null;
 }
 
 export interface Bus {

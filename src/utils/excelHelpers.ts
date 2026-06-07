@@ -1,5 +1,10 @@
-import * as XLSX from 'xlsx';
 import type { Bus } from '../types';
+
+// `xlsx` is large; load it on demand so it stays out of the initial bundle and is
+// only pulled in when the user actually imports/exports an Excel file.
+type XlsxModule = typeof import('xlsx');
+let xlsxPromise: Promise<XlsxModule> | null = null;
+const loadXlsx = (): Promise<XlsxModule> => (xlsxPromise ??= import('xlsx'));
 
 // Robust helper to parse and format date values from Excel
 const formatExcelDate = (val: unknown): string => {
@@ -46,7 +51,8 @@ const validatePlate = (plate: string): boolean => {
 };
 
 // Export buses data to Excel (.xlsx) file
-export const exportBusesToExcel = (buses: Bus[]) => {
+export const exportBusesToExcel = async (buses: Bus[]) => {
+  const XLSX = await loadXlsx();
   const data = buses.map((bus) => ({
     'Plaka': bus.plate,
     'Marka / Model': bus.brand,
@@ -87,13 +93,14 @@ export const importBusesFromExcel = (file: File): Promise<Omit<Bus, 'id'>[]> => 
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
 
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
       try {
         const data = e.target?.result;
         if (!data) {
           throw new Error('Dosya okunamadı.');
         }
 
+        const XLSX = await loadXlsx();
         const workbook = XLSX.read(data, { type: 'array' });
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];

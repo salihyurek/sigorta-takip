@@ -19,6 +19,7 @@ interface User {
   id: string;
   email: string;
   role?: string;
+  isBootstrap?: boolean;
 }
 
 function getErrorMessage(error: unknown, fallback: string) {
@@ -64,9 +65,15 @@ export const Settings = ({
   const [users, setUsers] = useState<User[]>([]);
   const [newAdminEmail, setNewAdminEmail] = useState('');
   const [newAdminPassword, setNewAdminPassword] = useState('');
+  const [newAdminRole, setNewAdminRole] = useState<'viewer' | 'superadmin'>('viewer');
   const [userActionError, setUserActionError] = useState<string | null>(null);
   const [userActionSuccess, setUserActionSuccess] = useState<string | null>(null);
   const [addingUser, setAddingUser] = useState(false);
+
+  const authHeader = () => {
+    const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+    return { 'Authorization': `Bearer ${token}` };
+  };
 
   // Password Change state
   const [oldPassword, setOldPassword] = useState('');
@@ -82,9 +89,7 @@ export const Settings = ({
     try {
       const token = localStorage.getItem('token') || sessionStorage.getItem('token');
       const res = await fetch('/api/users', {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
         const data = await res.json();
@@ -166,27 +171,52 @@ export const Settings = ({
 
     try {
       setAddingUser(true);
-      const token = localStorage.getItem('token') || sessionStorage.getItem('token');
       const res = await fetch('/api/users', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ email: newAdminEmail, password: newAdminPassword })
+        headers: { 'Content-Type': 'application/json', ...authHeader() },
+        body: JSON.stringify({ email: newAdminEmail, password: newAdminPassword, role: newAdminRole })
       });
 
       const data = await safeJson(res);
-      if (!res.ok) throw new Error(data?.error || 'Yönetici eklenemedi.');
+      if (!res.ok) throw new Error(data?.error || 'Kullanıcı eklenemedi.');
 
-      setUserActionSuccess(`"${newAdminEmail}" başarıyla yönetici olarak yetkilendirildi.`);
+      const roleLabel = newAdminRole === 'superadmin' ? 'Yönetici' : 'Gözlemci';
+      setUserActionSuccess(`"${newAdminEmail}" başarıyla ${roleLabel} olarak eklendi.`);
       setNewAdminEmail('');
       setNewAdminPassword('');
+      setNewAdminRole('viewer');
       fetchUsers();
     } catch (err: unknown) {
-      setUserActionError(getErrorMessage(err, 'Yönetici eklenemedi.'));
+      setUserActionError(getErrorMessage(err, 'Kullanıcı eklenemedi.'));
     } finally {
       setAddingUser(false);
+    }
+  };
+
+  // Promote/demote an existing user
+  const handleChangeRole = async (email: string, role: 'viewer' | 'superadmin') => {
+    if (!isSuperAdmin) return;
+    setUserActionError(null);
+    setUserActionSuccess(null);
+
+    const roleLabel = role === 'superadmin' ? 'Yönetici' : 'Gözlemci';
+    if (!window.confirm(`"${email}" kullanıcısının yetkisi "${roleLabel}" olarak değiştirilsin mi? Bu kullanıcının oturumu sonlandırılacaktır.`)) {
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/users/${encodeURIComponent(email)}/role`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...authHeader() },
+        body: JSON.stringify({ role })
+      });
+      const data = await safeJson(res);
+      if (!res.ok) throw new Error(data?.error || 'Yetki güncellenemedi.');
+
+      setUserActionSuccess(`"${email}" artık ${roleLabel}.`);
+      fetchUsers();
+    } catch (err: unknown) {
+      setUserActionError(getErrorMessage(err, 'Yetki güncellenemedi.'));
     }
   };
 
@@ -198,22 +228,19 @@ export const Settings = ({
       return;
     }
 
-    if (window.confirm(`"${email}" adresinin yönetici yetkisini kaldırmak istediğinizden emin misiniz?`)) {
+    if (window.confirm(`"${email}" kullanıcısının erişim yetkisini kaldırmak istediğinizden emin misiniz?`)) {
       try {
-        const token = localStorage.getItem('token') || sessionStorage.getItem('token');
-        const res = await fetch(`/api/users/${email}`, {
+        const res = await fetch(`/api/users/${encodeURIComponent(email)}`, {
           method: 'DELETE',
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
+          headers: { ...authHeader() }
         });
 
         const data = await safeJson(res);
-        if (!res.ok) throw new Error(data?.error || 'Yönetici silinemedi.');
+        if (!res.ok) throw new Error(data?.error || 'Kullanıcı silinemedi.');
 
         fetchUsers();
       } catch (err: unknown) {
-        alert(getErrorMessage(err, 'Yönetici silinemedi.'));
+        alert(getErrorMessage(err, 'Kullanıcı silinemedi.'));
       }
     }
   };
@@ -312,10 +339,10 @@ export const Settings = ({
   const [excelError, setExcelError] = useState<string | null>(null);
   const [excelSuccess, setExcelSuccess] = useState<string | null>(null);
 
-  const handleExcelExport = () => {
+  const handleExcelExport = async () => {
     if (!isSuperAdmin) return;
     try {
-      exportBusesToExcel(busesData);
+      await exportBusesToExcel(busesData);
     } catch (err: unknown) {
       alert(getErrorMessage(err, 'Excel aktarımı başarısız oldu.'));
     }
@@ -621,10 +648,10 @@ export const Settings = ({
               </form>
             </div>
 
-            {/* Admin User Management */}
+            {/* User Management */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <h3 style={{ fontSize: '1.1rem', fontWeight: 700, borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>Yeni Yönetici Yetkilendir</h3>
-              
+              <h3 style={{ fontSize: '1.1rem', fontWeight: 700, borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>Yeni Kullanıcı Ekle</h3>
+
               {userActionError && <div style={{ padding: '0.5rem', background: 'var(--danger-bg)', color: 'var(--danger)', borderRadius: '4px', fontSize: '0.8rem' }}>{userActionError}</div>}
               {userActionSuccess && <div style={{ padding: '0.5rem', background: 'var(--success-bg)', color: 'var(--success)', borderRadius: '4px', fontSize: '0.8rem' }}>{userActionSuccess}</div>}
 
@@ -633,7 +660,7 @@ export const Settings = ({
                   <label className="form-label">E-posta</label>
                   <input
                     type="email"
-                    placeholder="yeni_yonetici@acente.com"
+                    placeholder="yeni_kullanici@acente.com"
                     className="form-control"
                     value={newAdminEmail}
                     onChange={(e) => setNewAdminEmail(e.target.value)}
@@ -651,36 +678,60 @@ export const Settings = ({
                     required
                   />
                 </div>
+                <div className="form-group">
+                  <label className="form-label">Yetki</label>
+                  <select
+                    className="form-control select-control"
+                    value={newAdminRole}
+                    onChange={(e) => setNewAdminRole(e.target.value as 'viewer' | 'superadmin')}
+                  >
+                    <option value="viewer">Gözlemci (sadece görüntüleme)</option>
+                    <option value="superadmin">Yönetici (tam yetki)</option>
+                  </select>
+                </div>
                 <button type="submit" className="btn-primary" disabled={addingUser} style={{ marginTop: '0.5rem' }}>
                   <UserPlus size={16} />
-                  Yönetici Ekle
+                  Kullanıcı Ekle
                 </button>
               </form>
 
-              <h3 style={{ fontSize: '1rem', fontWeight: 700, marginTop: '1rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>Mevcut Yöneticiler</h3>
+              <h3 style={{ fontSize: '1rem', fontWeight: 700, marginTop: '1rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>Mevcut Kullanıcılar</h3>
               <div className="user-list">
-                {users.map(u => (
-                  <div key={u.id} className="user-item">
-                    <span className="user-email">
-                      {u.email}
-                      <span className="user-tag" style={{ background: u.role === 'superadmin' ? 'rgba(139, 90, 60, 0.12)' : 'rgba(139, 90, 60, 0.06)', color: u.role === 'superadmin' ? 'var(--primary)' : 'var(--text-secondary)' }}>
-                        {u.role === 'superadmin' ? 'Yönetici' : 'Gözlemci'}
+                {users.map(u => {
+                  const isSelf = u.email.toLowerCase() === currentUserEmail.toLowerCase();
+                  const isAdmin = u.role === 'superadmin';
+                  const canManage = !isSelf && !u.isBootstrap;
+                  return (
+                    <div key={u.id} className="user-item">
+                      <span className="user-email">
+                        {u.email}
+                        <span className="user-tag" style={{ background: isAdmin ? 'rgba(139, 90, 60, 0.12)' : 'rgba(139, 90, 60, 0.06)', color: isAdmin ? 'var(--primary)' : 'var(--text-secondary)' }}>
+                          {isAdmin ? 'Yönetici' : 'Gözlemci'}
+                        </span>
+                        {isSelf && <span className="user-tag">Siz</span>}
                       </span>
-                      {u.email.toLowerCase() === currentUserEmail.toLowerCase() && (
-                        <span className="user-tag">Siz</span>
+                      {canManage && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                          <button
+                            className="btn-secondary"
+                            onClick={() => handleChangeRole(u.email, isAdmin ? 'viewer' : 'superadmin')}
+                            title={isAdmin ? 'Gözlemciye düşür' : 'Yönetici yap'}
+                            style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem' }}
+                          >
+                            {isAdmin ? 'Gözlemci Yap' : 'Yönetici Yap'}
+                          </button>
+                          <button
+                            className="icon-btn delete"
+                            onClick={() => handleDeleteUser(u.email)}
+                            title="Kullanıcıyı Sil"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
                       )}
-                    </span>
-                    {u.email.toLowerCase() !== currentUserEmail.toLowerCase() && u.role !== 'superadmin' && (
-                      <button
-                        className="icon-btn delete"
-                        onClick={() => handleDeleteUser(u.email)}
-                        title="Yetkiyi Kaldır"
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    )}
-                  </div>
-                ))}
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
@@ -708,6 +759,9 @@ export const Settings = ({
             <Download size={16} />
             Yedek İndir (.json)
           </button>
+          <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.4rem', lineHeight: 1.4 }}>
+            Güvenlik nedeniyle SMTP şifresi yedeğe dahil edilmez. Geri yükleme sonrası mevcut SMTP şifreniz korunur.
+          </p>
         </div>
 
         {/* Restore Button */}

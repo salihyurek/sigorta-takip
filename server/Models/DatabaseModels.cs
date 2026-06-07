@@ -41,6 +41,12 @@ namespace SigortaTakip.Models
 
         [JsonPropertyName("lastEmailedDate")]
         public string? LastEmailedDate { get; set; }
+
+        // The smallest reminder threshold (in days remaining) we have already notified for
+        // this policy's current end date. Reset to null whenever the end date changes.
+        // Used to send tiered advance-warning emails (e.g. 15, 7, 1, 0 days) without spamming.
+        [JsonPropertyName("lastNotifiedThreshold")]
+        public int? LastNotifiedThreshold { get; set; }
     }
 
     public class Bus

@@ -1,8 +1,11 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 
 namespace SigortaTakip.Services
 {
@@ -18,15 +21,28 @@ namespace SigortaTakip.Services
         private readonly ConcurrentDictionary<string, SessionData> _sessions = new();
         private readonly TimeSpan _sessionTtl = TimeSpan.FromHours(24);
         private readonly CancellationTokenSource _cts = new();
+        private readonly string _sessionFile;
+        private readonly object _fileLock = new();
 
         public AuthService()
         {
-            // Start a background task to clean expired sessions periodically (every hour)
+            // Persist sessions next to the database so they survive server restarts
+            // (otherwise every redeploy / container restart logs everyone out).
+            var dataDir = Environment.GetEnvironmentVariable("DATA_DIR");
+            var dir = string.IsNullOrWhiteSpace(dataDir)
+                ? Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "..", "data"))
+                : Path.GetFullPath(dataDir);
+            _sessionFile = Path.Combine(dir, "sessions.json");
+
+            LoadSessions();
+
+            // Periodically purge expired sessions (every hour).
             System.Threading.Tasks.Task.Run(async () =>
             {
                 while (!_cts.Token.IsCancellationRequested)
                 {
-                    try { await System.Threading.Tasks.Task.Delay(TimeSpan.FromHours(1), _cts.Token); } catch (TaskCanceledException) { break; }
+                    try { await System.Threading.Tasks.Task.Delay(TimeSpan.FromHours(1), _cts.Token); }
+                    catch (TaskCanceledException) { break; }
                     CleanExpiredSessions();
                 }
             });
@@ -34,19 +50,18 @@ namespace SigortaTakip.Services
 
         public string CreateSession(string email, string role)
         {
-            // Generate a secure 32-byte hex token matching Node's crypto.randomBytes(32).toString('hex')
             byte[] randomBytes = new byte[32];
             RandomNumberGenerator.Fill(randomBytes);
             string token = Convert.ToHexString(randomBytes).ToLowerInvariant();
 
-            var session = new SessionData
+            _sessions[token] = new SessionData
             {
                 Email = email,
                 Role = role,
                 CreatedAt = DateTime.UtcNow
             };
 
-            _sessions[token] = session;
+            SaveSessions();
             return token;
         }
 
@@ -59,7 +74,7 @@ namespace SigortaTakip.Services
 
             if (DateTime.UtcNow - session.CreatedAt > _sessionTtl)
             {
-                _sessions.TryRemove(token, out _);
+                if (_sessions.TryRemove(token, out _)) SaveSessions();
                 return null;
             }
 
@@ -68,20 +83,33 @@ namespace SigortaTakip.Services
 
         public void DeleteSession(string token)
         {
-            _sessions.TryRemove(token, out _);
+            if (_sessions.TryRemove(token, out _)) SaveSessions();
         }
 
         public void DeleteAllSessionsForUser(string email)
         {
+            DeleteAllSessionsForUser(email, exceptToken: null);
+        }
+
+        /// <summary>
+        /// Invalidate every session for a user, optionally keeping one token alive.
+        /// Used after a self-initiated password change so the current user is not
+        /// abruptly logged out of the session they are actively using.
+        /// </summary>
+        public void DeleteAllSessionsForUser(string email, string? exceptToken)
+        {
             var tokensToRemove = _sessions
                 .Where(kvp => string.Equals(kvp.Value.Email, email, StringComparison.OrdinalIgnoreCase))
                 .Select(kvp => kvp.Key)
+                .Where(t => exceptToken == null || !string.Equals(t, exceptToken, StringComparison.Ordinal))
                 .ToList();
 
+            bool changed = false;
             foreach (var token in tokensToRemove)
             {
-                _sessions.TryRemove(token, out _);
+                if (_sessions.TryRemove(token, out _)) changed = true;
             }
+            if (changed) SaveSessions();
         }
 
         public string HashPassword(string password)
@@ -120,9 +148,57 @@ namespace SigortaTakip.Services
                 .Select(kvp => kvp.Key)
                 .ToList();
 
+            bool changed = false;
             foreach (var token in expiredTokens)
             {
-                _sessions.TryRemove(token, out _);
+                if (_sessions.TryRemove(token, out _)) changed = true;
+            }
+            if (changed) SaveSessions();
+        }
+
+        private void LoadSessions()
+        {
+            try
+            {
+                if (!File.Exists(_sessionFile)) return;
+                var json = File.ReadAllText(_sessionFile);
+                var stored = JsonSerializer.Deserialize<Dictionary<string, SessionData>>(json);
+                if (stored == null) return;
+
+                var now = DateTime.UtcNow;
+                foreach (var kvp in stored)
+                {
+                    if (now - kvp.Value.CreatedAt <= _sessionTtl)
+                    {
+                        _sessions[kvp.Key] = kvp.Value;
+                    }
+                }
+                Console.WriteLine($"[Auth] Restored {_sessions.Count} active session(s) from disk.");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Auth] Could not load sessions: {ex.Message}");
+            }
+        }
+
+        private void SaveSessions()
+        {
+            lock (_fileLock)
+            {
+                try
+                {
+                    var dir = Path.GetDirectoryName(_sessionFile);
+                    if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir)) Directory.CreateDirectory(dir);
+
+                    var snapshot = new Dictionary<string, SessionData>(_sessions);
+                    var tempFile = $"{_sessionFile}.tmp";
+                    File.WriteAllText(tempFile, JsonSerializer.Serialize(snapshot));
+                    File.Move(tempFile, _sessionFile, overwrite: true);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[Auth] Could not persist sessions: {ex.Message}");
+                }
             }
         }
     }

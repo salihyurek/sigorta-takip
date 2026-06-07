@@ -7,20 +7,33 @@ export function getTodayString(): string {
   return `${year}-${month}-${day}`;
 }
 
+// Parse a YYYY-MM-DD string as a LOCAL calendar date (midnight local time).
+// Using `new Date('YYYY-MM-DD')` would parse as UTC midnight, which shifts the day
+// for non-UTC users and causes off-by-one errors near midnight.
+function parseLocalDate(dateStr: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
+  if (!m) {
+    const fallback = new Date(dateStr);
+    return isNaN(fallback.getTime()) ? null : fallback;
+  }
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+}
+
 // Calculate days remaining between today and the end date
 export function getDaysRemaining(endDateStr: string): number {
   if (!endDateStr) return 0;
-  
+
   const today = new Date();
   // Set time components to midnight to compare only dates
   today.setHours(0, 0, 0, 0);
-  
-  const end = new Date(endDateStr);
+
+  const end = parseLocalDate(endDateStr);
+  if (!end) return 0;
   end.setHours(0, 0, 0, 0);
-  
+
   const diffTime = end.getTime() - today.getTime();
-  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-  
+  const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
+
   return diffDays;
 }
 

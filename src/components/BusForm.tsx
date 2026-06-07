@@ -1,4 +1,4 @@
-import { useState, useEffect, type FormEvent, type ChangeEvent } from 'react';
+import { useState, useEffect, useRef, type FormEvent, type ChangeEvent } from 'react';
 import type { Bus } from '../types';
 import { X, Calendar, ShieldCheck, FileText, Bus as BusIcon } from 'lucide-react';
 
@@ -29,17 +29,40 @@ export const BusForm = ({ bus, onSave, onClose }: BusFormProps) => {
 
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const modalRef = useRef<HTMLDivElement>(null);
 
-  // Close on Escape key
+  // Close on Escape + trap focus inside the dialog for keyboard/screen-reader users.
   useEffect(() => {
-    const handleEsc = (e: KeyboardEvent) => {
+    const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && !submitting) {
         onClose();
+        return;
+      }
+      if (e.key === 'Tab' && modalRef.current) {
+        const focusable = modalRef.current.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        );
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
       }
     };
-    document.addEventListener('keydown', handleEsc);
-    return () => document.removeEventListener('keydown', handleEsc);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
   }, [onClose, submitting]);
+
+  // Move focus into the dialog when it opens.
+  useEffect(() => {
+    const firstInput = modalRef.current?.querySelector<HTMLElement>('input, select, textarea');
+    firstInput?.focus();
+  }, []);
 
   // Initialize form with bus details if editing
   useEffect(() => {
@@ -155,13 +178,13 @@ export const BusForm = ({ bus, onSave, onClose }: BusFormProps) => {
 
   return (
     <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget && !submitting) onClose(); }}>
-      <div className="modal-content">
+      <div className="modal-content" ref={modalRef} role="dialog" aria-modal="true" aria-labelledby="busform-title">
         <div className="modal-header">
-          <h3 className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <h3 id="busform-title" className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <BusIcon size={20} className="text-primary" />
             {bus ? 'Araç ve Poliçe Bilgilerini Düzenle' : 'Yeni Araç Ekle'}
           </h3>
-          <button className="icon-btn" onClick={onClose}>
+          <button className="icon-btn" onClick={onClose} aria-label="Kapat">
             <X size={20} />
           </button>
         </div>
@@ -184,6 +207,7 @@ export const BusForm = ({ bus, onSave, onClose }: BusFormProps) => {
                   className="form-control"
                   value={plate}
                   onChange={handlePlateChange}
+                  maxLength={20}
                   required
                 />
               </div>
@@ -196,6 +220,7 @@ export const BusForm = ({ bus, onSave, onClose }: BusFormProps) => {
                   className="form-control"
                   value={brand}
                   onChange={(e) => setBrand(e.target.value)}
+                  maxLength={120}
                   required
                 />
               </div>
@@ -208,6 +233,7 @@ export const BusForm = ({ bus, onSave, onClose }: BusFormProps) => {
                   className="form-control"
                   value={operator}
                   onChange={(e) => setOperator(e.target.value)}
+                  maxLength={120}
                   required
                 />
               </div>

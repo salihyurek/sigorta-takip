@@ -12,17 +12,28 @@ namespace SigortaTakip.Services
     {
         private SmtpClient CreateSmtpClient(Settings settings)
         {
-            if (string.IsNullOrWhiteSpace(settings.SmtpHost) || 
-                string.IsNullOrWhiteSpace(settings.SmtpUser) || 
+            if (string.IsNullOrWhiteSpace(settings.SmtpHost) ||
+                string.IsNullOrWhiteSpace(settings.SmtpUser) ||
                 string.IsNullOrWhiteSpace(settings.SmtpPass))
             {
                 throw new InvalidOperationException("SMTP ayarları eksik. Lütfen SMTP ayarlarını panelden yapılandırın.");
             }
 
+            // NOTE: System.Net.Mail.SmtpClient only supports STARTTLS (explicit TLS),
+            // not implicit TLS on port 465. Use port 587 (STARTTLS) with providers like
+            // Gmail/Outlook. Port 25 is plain. EnableSsl upgrades the connection via STARTTLS.
+            if (settings.SmtpPort == 465)
+            {
+                throw new InvalidOperationException(
+                    "Port 465 (örtük SSL) bu sürümde desteklenmiyor. Lütfen STARTTLS için 587 portunu kullanın.");
+            }
+
             var client = new SmtpClient(settings.SmtpHost, settings.SmtpPort)
             {
                 Credentials = new NetworkCredential(settings.SmtpUser, settings.SmtpPass),
-                EnableSsl = settings.SmtpPort == 465 || settings.SmtpPort == 587
+                DeliveryMethod = SmtpDeliveryMethod.Network,
+                EnableSsl = settings.SmtpPort != 25,
+                Timeout = 20000
             };
 
             return client;
@@ -34,7 +45,7 @@ namespace SigortaTakip.Services
             return WebUtility.HtmlEncode(str);
         }
 
-        private string GenerateEmailTemplate(string title, string message, Bus? busDetails = null, string? policyType = null, string? expiryDate = null)
+        private string GenerateEmailTemplate(string title, string message, Bus? busDetails = null, string? policyType = null, string? expiryDate = null, string? remainingText = null)
         {
             var policyNames = new Dictionary<string, string>
             {
@@ -52,15 +63,21 @@ namespace SigortaTakip.Services
                 var policyRowHtml = "";
                 if (!string.IsNullOrEmpty(policyType) && policyNames.TryGetValue(policyType, out var pName))
                 {
+                    var remainingRow = string.IsNullOrEmpty(remainingText) ? "" : $@"
+                        <tr>
+                            <th>Kalan Süre</th>
+                            <td><strong>{EscapeHtml(remainingText)}</strong></td>
+                        </tr>";
+
                     policyRowHtml = $@"
                         <tr>
-                            <th>Biten Sigorta</th>
+                            <th>İlgili Sigorta</th>
                             <td><span class=""policy-badge"">{pName}</span></td>
                         </tr>
                         <tr>
                             <th>Bitiş Tarihi</th>
                             <td><strong>{expiryDate}</strong></td>
-                        </tr>";
+                        </tr>{remainingRow}";
                 }
 
                 busDetailsHtml = $@"
@@ -197,7 +214,7 @@ namespace SigortaTakip.Services
     </html>";
         }
 
-        public async Task SendExpiryAlertAsync(Bus bus, string policyType, string endDate, Settings settings)
+        public async Task SendPolicyReminderAsync(Bus bus, string policyType, string endDate, int daysRemaining, Settings settings)
         {
             var policyNames = new Dictionary<string, string>
             {
@@ -207,16 +224,40 @@ namespace SigortaTakip.Services
             };
 
             var pName = policyNames.GetValueOrDefault(policyType, policyType);
-            var title = $"🚨 SİGORTA SÜRESİ DOLDU: {EscapeHtml(bus.Plate)}";
-            var message = $"<strong>{EscapeHtml(bus.Plate)}</strong> plakalı aracın <strong>{pName}</strong> süresi bugün ({EscapeHtml(endDate)}) dolmuştur!";
+            var plate = EscapeHtml(bus.Plate);
 
-            var htmlContent = GenerateEmailTemplate(title, message, bus, policyType, endDate);
+            string title, message, subject, remainingText;
+
+            if (daysRemaining < 0)
+            {
+                int overdue = Math.Abs(daysRemaining);
+                title = $"🚨 SİGORTA SÜRESİ DOLDU: {plate}";
+                message = $"<strong>{plate}</strong> plakalı aracın <strong>{pName}</strong> süresi <strong>{overdue} gün önce</strong> ({EscapeHtml(endDate)}) dolmuştur!";
+                subject = $"[Sigorta Uyarısı] {bus.Plate} - {pName} süresi doldu!";
+                remainingText = $"{overdue} gün önce doldu";
+            }
+            else if (daysRemaining == 0)
+            {
+                title = $"🚨 SİGORTA BUGÜN BİTİYOR: {plate}";
+                message = $"<strong>{plate}</strong> plakalı aracın <strong>{pName}</strong> süresi <strong>bugün</strong> ({EscapeHtml(endDate)}) doluyor!";
+                subject = $"[Sigorta Uyarısı] {bus.Plate} - {pName} bugün bitiyor!";
+                remainingText = "Bugün doluyor";
+            }
+            else
+            {
+                title = $"⚠️ SİGORTA YENİLEME HATIRLATMASI: {plate}";
+                message = $"<strong>{plate}</strong> plakalı aracın <strong>{pName}</strong> süresinin dolmasına <strong>{daysRemaining} gün</strong> kaldı (Bitiş: {EscapeHtml(endDate)}).";
+                subject = $"[Sigorta Hatırlatma] {bus.Plate} - {pName} bitişine {daysRemaining} gün";
+                remainingText = $"{daysRemaining} gün kaldı";
+            }
+
+            var htmlContent = GenerateEmailTemplate(title, message, bus, policyType, endDate, remainingText);
 
             using var client = CreateSmtpClient(settings);
             var mailMessage = new MailMessage
             {
                 From = new MailAddress(settings.SenderEmail, !string.IsNullOrWhiteSpace(settings.SenderName) ? settings.SenderName : "Sigorta Takip"),
-                Subject = $"[Sigorta Uyarısı] {bus.Plate} - {pName} Bitti!",
+                Subject = subject,
                 Body = htmlContent,
                 IsBodyHtml = true,
                 BodyEncoding = Encoding.UTF8

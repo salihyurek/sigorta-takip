@@ -10,10 +10,15 @@ namespace SigortaTakip.Controllers
     [Route("api/users")]
     public class UsersController : BaseApiController
     {
+        private static readonly string[] AllowedRoles = { "viewer", "superadmin" };
+
         public UsersController(DbService dbService, AuthService authService)
             : base(dbService, authService)
         {
         }
+
+        private bool IsBootstrapAdmin(string email) =>
+            string.Equals(email.Trim(), Db.SuperadminEmail.Trim(), StringComparison.OrdinalIgnoreCase);
 
         [HttpGet]
         public IActionResult GetUsers()
@@ -28,14 +33,16 @@ namespace SigortaTakip.Controllers
                 {
                     id = u.Id,
                     email = u.Email,
-                    role = u.Role
+                    role = u.Role,
+                    isBootstrap = IsBootstrapAdmin(u.Email)
                 }).ToList();
 
                 return Ok(usersList);
             }
             catch (Exception ex)
             {
-                return StatusCode(500, new { error = "Kullanıcılar listelenemedi", details = ex.Message });
+                Console.WriteLine($"[Users] GetUsers failed: {ex}");
+                return StatusCode(500, new { error = "Kullanıcılar listelenemedi." });
             }
         }
 
@@ -43,6 +50,7 @@ namespace SigortaTakip.Controllers
         {
             public string Email { get; set; } = "";
             public string Password { get; set; } = "";
+            public string? Role { get; set; }
         }
 
         [HttpPost]
@@ -57,17 +65,22 @@ namespace SigortaTakip.Controllers
                 {
                     return BadRequest(new { error = "E-posta ve şifre gereklidir." });
                 }
-
-                var passwordError = ValidatePasswordStrength(req.Password);
-                if (passwordError != null)
+                if (req.Email.Length > MaxTextLength)
                 {
-                    return BadRequest(new { error = passwordError });
+                    return BadRequest(new { error = "E-posta adresi çok uzun." });
                 }
 
-                var data = Db.ReadDb();
-                var emailExists = data.Users.Any(u => string.Equals(u.Email.Trim(), req.Email.Trim(), StringComparison.OrdinalIgnoreCase));
+                var role = string.IsNullOrWhiteSpace(req.Role) ? "viewer" : req.Role.Trim().ToLowerInvariant();
+                if (!AllowedRoles.Contains(role))
+                {
+                    return BadRequest(new { error = "Geçersiz yetki seçimi." });
+                }
 
-                if (emailExists)
+                var passwordError = ValidatePasswordStrength(req.Password);
+                if (passwordError != null) return BadRequest(new { error = passwordError });
+
+                var data = Db.ReadDb();
+                if (data.Users.Any(u => string.Equals(u.Email.Trim(), req.Email.Trim(), StringComparison.OrdinalIgnoreCase)))
                 {
                     return BadRequest(new { error = "Bu e-posta adresi zaten yetkilendirilmiş!" });
                 }
@@ -77,7 +90,7 @@ namespace SigortaTakip.Controllers
                     Id = "user-" + DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                     Email = req.Email.ToLowerInvariant().Trim(),
                     Password = Auth.HashPassword(req.Password),
-                    Role = "viewer", // Added users default to viewers
+                    Role = role,
                     ResetToken = null,
                     ResetTokenExpiry = null
                 };
@@ -85,11 +98,61 @@ namespace SigortaTakip.Controllers
                 data.Users.Add(newUser);
                 Db.WriteDb(data);
 
-                return StatusCode(201, new { id = newUser.Id, email = newUser.Email });
+                return StatusCode(201, new { id = newUser.Id, email = newUser.Email, role = newUser.Role });
             }
             catch (Exception ex)
             {
-                return StatusCode(500, new { error = "Kullanıcı eklenemedi", details = ex.Message });
+                Console.WriteLine($"[Users] CreateUser failed: {ex}");
+                return StatusCode(500, new { error = "Kullanıcı eklenemedi." });
+            }
+        }
+
+        public class UpdateRoleRequest
+        {
+            public string Role { get; set; } = "";
+        }
+
+        [HttpPut("{email}/role")]
+        public IActionResult UpdateRole(string email, [FromBody] UpdateRoleRequest req)
+        {
+            var adminCheck = CheckSuperAdmin();
+            if (adminCheck != null) return adminCheck;
+
+            try
+            {
+                var role = (req.Role ?? "").Trim().ToLowerInvariant();
+                if (!AllowedRoles.Contains(role))
+                {
+                    return BadRequest(new { error = "Geçersiz yetki seçimi." });
+                }
+
+                var targetEmail = email.ToLowerInvariant().Trim();
+
+                if (IsBootstrapAdmin(targetEmail))
+                {
+                    return BadRequest(new { error = "Ana yönetici hesabının yetkisi değiştirilemez." });
+                }
+                if (string.Equals(targetEmail, CurrentUserEmail?.ToLowerInvariant().Trim(), StringComparison.OrdinalIgnoreCase))
+                {
+                    return BadRequest(new { error = "Kendi yetkinizi değiştiremezsiniz." });
+                }
+
+                var data = Db.ReadDb();
+                var user = data.Users.FirstOrDefault(u => string.Equals(u.Email, targetEmail, StringComparison.OrdinalIgnoreCase));
+                if (user == null) return NotFound(new { error = "Kullanıcı bulunamadı." });
+
+                user.Role = role;
+                Db.WriteDb(data);
+
+                // Force the affected user to re-authenticate so the new role takes effect.
+                Auth.DeleteAllSessionsForUser(user.Email);
+
+                return Ok(new { success = true, email = user.Email, role = user.Role });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Users] UpdateRole failed: {ex}");
+                return StatusCode(500, new { error = "Yetki güncellenemedi." });
             }
         }
 
@@ -107,28 +170,34 @@ namespace SigortaTakip.Controllers
                 {
                     return BadRequest(new { error = "Kendi hesabınızı silemezsiniz!" });
                 }
-
-                var data = Db.ReadDb();
-
-                if (data.Users.Count <= 1)
+                if (IsBootstrapAdmin(targetEmail))
                 {
-                    return BadRequest(new { error = "Sistemde en az bir yönetici bulunmalıdır." });
+                    return BadRequest(new { error = "Ana yönetici hesabı silinemez." });
                 }
 
+                var data = Db.ReadDb();
                 var userIndex = data.Users.FindIndex(u => string.Equals(u.Email, targetEmail, StringComparison.OrdinalIgnoreCase));
-                if (userIndex == -1)
+                if (userIndex == -1) return NotFound(new { error = "Kullanıcı bulunamadı." });
+
+                // Never leave the system without at least one superadmin.
+                var target = data.Users[userIndex];
+                if (string.Equals(target.Role, "superadmin", StringComparison.OrdinalIgnoreCase) &&
+                    data.Users.Count(u => string.Equals(u.Role, "superadmin", StringComparison.OrdinalIgnoreCase)) <= 1)
                 {
-                    return NotFound(new { error = "Kullanıcı bulunamadı." });
+                    return BadRequest(new { error = "Sistemde en az bir yönetici bulunmalıdır." });
                 }
 
                 data.Users.RemoveAt(userIndex);
                 Db.WriteDb(data);
 
+                Auth.DeleteAllSessionsForUser(targetEmail);
+
                 return Ok(new { success = true, message = "Kullanıcı yetkisi kaldırıldı." });
             }
             catch (Exception ex)
             {
-                return StatusCode(500, new { error = "Kullanıcı silinemedi", details = ex.Message });
+                Console.WriteLine($"[Users] DeleteUser failed: {ex}");
+                return StatusCode(500, new { error = "Kullanıcı silinemedi." });
             }
         }
     }

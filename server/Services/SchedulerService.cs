@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -12,20 +13,42 @@ namespace SigortaTakip.Services
     {
         private readonly DbService _dbService;
         private readonly MailService _mailService;
+        private readonly TimeService _time;
+        private readonly int[] _reminderDays;
         private int _lastRunHour = -1;
         private DateTime _lastRunDate = DateTime.MinValue;
 
-        public SchedulerService(DbService dbService, MailService mailService)
+        public SchedulerService(DbService dbService, MailService mailService, TimeService time)
         {
             _dbService = dbService;
             _mailService = mailService;
+            _time = time;
+            _reminderDays = ParseReminderDays(Environment.GetEnvironmentVariable("REMINDER_DAYS"));
+            Console.WriteLine($"[Scheduler] Reminder thresholds (days before expiry): {string.Join(", ", _reminderDays)}");
+        }
+
+        // Thresholds at which we send a warning, e.g. 15/7/1 days before and on expiry (0).
+        // 0 is always included so the expiry day itself is never missed.
+        private static int[] ParseReminderDays(string? raw)
+        {
+            var defaults = new[] { 15, 7, 1, 0 };
+            if (string.IsNullOrWhiteSpace(raw)) return defaults;
+
+            var parsed = raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(s => int.TryParse(s, out var n) ? (int?)n : null)
+                .Where(n => n.HasValue && n.Value >= 0)
+                .Select(n => n!.Value)
+                .ToList();
+
+            if (parsed.Count == 0) return defaults;
+            if (!parsed.Contains(0)) parsed.Add(0);
+            return parsed.Distinct().OrderByDescending(n => n).ToArray();
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             Console.WriteLine("[Scheduler] Cron scheduler initialized.");
 
-            // 1. Run check on startup after a small delay (10 seconds)
             try
             {
                 await Task.Delay(10000, stoppingToken);
@@ -41,27 +64,23 @@ namespace SigortaTakip.Services
                 Console.WriteLine($"[Scheduler] Startup check failed: {ex.Message}");
             }
 
-            // 2. Loop to check periodic times (runs every 5 minutes to check target hours)
             while (!stoppingToken.IsCancellationRequested)
             {
                 try
                 {
-                    var now = DateTime.Now;
+                    var now = _time.Now; // business timezone, not server/UTC time
                     int currentHour = now.Hour;
                     var currentDate = now.Date;
 
-                    // Check if we already ran in this hour to prevent double runs
                     if (_lastRunHour != currentHour || _lastRunDate != currentDate)
                     {
                         bool shouldRun = false;
 
-                        // Daily scheduled check (08:00 AM)
                         if (currentHour == 8)
                         {
-                            Console.WriteLine("[Scheduler] Running daily scheduled check (08:00 AM)...");
+                            Console.WriteLine("[Scheduler] Running daily scheduled check (08:00)...");
                             shouldRun = true;
                         }
-                        // Periodic check (every 4 hours: 00:00, 04:00, 12:00, 16:00, 20:00)
                         else if (currentHour == 0 || currentHour == 4 || currentHour == 12 || currentHour == 16 || currentHour == 20)
                         {
                             Console.WriteLine($"[Scheduler] Running periodic check ({currentHour}:00)...");
@@ -76,7 +95,6 @@ namespace SigortaTakip.Services
                         }
                     }
 
-                    // Sleep for 5 minutes before checking the clock again
                     await Task.Delay(TimeSpan.FromMinutes(5), stoppingToken);
                 }
                 catch (TaskCanceledException)
@@ -86,30 +104,53 @@ namespace SigortaTakip.Services
                 catch (Exception ex)
                 {
                     Console.WriteLine($"[Scheduler] Periodic check loop failed: {ex.Message}");
-                    // Wait a bit before retrying on general errors
                     await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
                 }
             }
+        }
+
+        private static int? DaysRemaining(string endDate, DateTime today)
+        {
+            if (!DateTime.TryParseExact(endDate, "yyyy-MM-dd", CultureInfo.InvariantCulture,
+                    DateTimeStyles.None, out var end))
+            {
+                return null;
+            }
+            return (end.Date - today.Date).Days;
+        }
+
+        // Most urgent reached threshold for a given days-remaining value, or null if none.
+        // Smaller threshold = more urgent. Expired policies (negative days) map to 0.
+        private int? CurrentThreshold(int daysRemaining)
+        {
+            int? bucket = null;
+            foreach (var t in _reminderDays)
+            {
+                if (daysRemaining <= t)
+                {
+                    bucket = (bucket == null) ? t : Math.Min(bucket.Value, t);
+                }
+            }
+            return bucket;
         }
 
         public async Task<int> CheckAllExpiriesAsync()
         {
             try
             {
-                Console.WriteLine($"[Scheduler] Checking for expiring policies. Current time: {DateTime.Now:yyyy-MM-ddTHH:mm:ss}");
-                
+                var now = _time.Now;
+                Console.WriteLine($"[Scheduler] Checking policies. Local time: {now:yyyy-MM-ddTHH:mm:ss}");
+
                 var data = _dbService.ReadDb();
                 var settings = data.Settings;
 
                 if (settings == null || !settings.EnableEmails)
                 {
-                    Console.WriteLine("[Scheduler] Email notifications are disabled in settings. Skipping check.");
+                    Console.WriteLine("[Scheduler] Email notifications disabled. Skipping.");
                     return 0;
                 }
 
-                var todayStr = DateTime.Now.ToString("yyyy-MM-dd");
-                Console.WriteLine($"[Scheduler] Checking for policies expiring today: {todayStr}");
-
+                var todayStr = _time.TodayString;
                 int emailsSent = 0;
                 bool hasChanges = false;
 
@@ -119,32 +160,34 @@ namespace SigortaTakip.Services
 
                     foreach (var policyKey in new[] { "trafik", "kasko", "koltuk" })
                     {
-                        if (bus.Policies.TryGetValue(policyKey, out var policy))
+                        if (!bus.Policies.TryGetValue(policyKey, out var policy) || policy == null) continue;
+
+                        var days = DaysRemaining(policy.EndDate, now);
+                        if (days == null) continue;
+
+                        var bucket = CurrentThreshold(days.Value);
+                        if (bucket == null) continue; // still outside the warning window
+
+                        // Only notify when we've entered a more urgent bucket than last time.
+                        // This resends nothing within the same bucket, yet still fires if the
+                        // server was down on the exact threshold day (it catches up).
+                        if (policy.LastNotifiedThreshold != null && policy.LastNotifiedThreshold.Value <= bucket.Value)
                         {
-                            if (policy != null && policy.EndDate == todayStr)
-                            {
-                                // Check if we already sent an email for this policy today
-                                if (policy.LastEmailedDate != todayStr)
-                                {
-                                    Console.WriteLine($"[Scheduler] Policy {policyKey} for bus {bus.Plate} expires today! Sending email...");
-                                    try
-                                    {
-                                        await _mailService.SendExpiryAlertAsync(bus, policyKey, todayStr, settings);
-                                        policy.LastEmailedDate = todayStr;
-                                        emailsSent++;
-                                        hasChanges = true;
-                                        Console.WriteLine($"[Scheduler] Email sent successfully for {bus.Plate} - {policyKey}");
-                                    }
-                                    catch (Exception err)
-                                    {
-                                        Console.WriteLine($"[Scheduler] Failed to send email for {bus.Plate} - {policyKey}: {err.Message}");
-                                    }
-                                }
-                                else
-                                {
-                                    Console.WriteLine($"[Scheduler] Policy {policyKey} for bus {bus.Plate} expires today, but an email was already sent today.");
-                                }
-                            }
+                            continue;
+                        }
+
+                        try
+                        {
+                            await _mailService.SendPolicyReminderAsync(bus, policyKey, policy.EndDate, days.Value, settings);
+                            policy.LastNotifiedThreshold = bucket.Value;
+                            policy.LastEmailedDate = todayStr;
+                            emailsSent++;
+                            hasChanges = true;
+                            Console.WriteLine($"[Scheduler] Sent reminder for {bus.Plate} - {policyKey} ({days} gün).");
+                        }
+                        catch (Exception err)
+                        {
+                            Console.WriteLine($"[Scheduler] Failed to email {bus.Plate} - {policyKey}: {err.Message}");
                         }
                     }
                 }
@@ -152,10 +195,10 @@ namespace SigortaTakip.Services
                 if (hasChanges)
                 {
                     _dbService.WriteDb(data);
-                    Console.WriteLine("[Scheduler] Database updated with email timestamps.");
+                    Console.WriteLine("[Scheduler] Database updated with notification timestamps.");
                 }
 
-                Console.WriteLine($"[Scheduler] Expiry check complete. Sent {emailsSent} email alerts.");
+                Console.WriteLine($"[Scheduler] Check complete. Sent {emailsSent} email(s).");
                 return emailsSent;
             }
             catch (Exception ex)
