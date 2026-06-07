@@ -8,11 +8,11 @@ const data = db.readDb();
 console.log(`Successfully read db. Found ${data.buses.length} buses and ${data.users.length} users.`);
 
 // Verify superadmin default seeding
-const superAdmin = data.users.find(u => u.email === 'salihyurek004@gmail.com');
+const superAdmin = data.users.find(u => u.email === db.SUPERADMIN_EMAIL);
 if (superAdmin && superAdmin.role === 'superadmin') {
-  console.log('✓ Seeding successful: salihyurek004@gmail.com exists with superadmin role.');
+  console.log(`✓ Seeding successful: ${db.SUPERADMIN_EMAIL} exists with superadmin role.`);
 } else {
-  console.error('✗ Seeding failed: salihyurek004@gmail.com not found or incorrect role!');
+  console.error(`✗ Seeding failed: ${db.SUPERADMIN_EMAIL} not found or incorrect role!`);
   process.exit(1);
 }
 
@@ -27,7 +27,7 @@ if (!oldAdmin) {
 
 // 2. Verify Hashing of Owner Password
 console.log('\nStep 2: Checking password hash for owner...');
-if (db.comparePassword('Ej+D8q6zhg3kRX*', superAdmin.password)) {
+if (db.comparePassword(db.SUPERADMIN_PASSWORD, superAdmin.password)) {
   console.log('✓ Password hash validates the owner\'s secure password.');
 } else {
   console.error('✗ Owner password hash mismatch!');

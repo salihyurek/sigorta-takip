@@ -5,6 +5,27 @@ const bcrypt = require('bcryptjs');
 const DB_DIR = path.join(__dirname, '..', 'data');
 const DB_FILE = path.join(DB_DIR, 'db.json');
 
+// Load environment variables from .env file if it exists
+const dotenvPath = path.join(__dirname, '..', '.env');
+if (fs.existsSync(dotenvPath)) {
+  const dotenvContent = fs.readFileSync(dotenvPath, 'utf8');
+  dotenvContent.split(/\r?\n/).forEach(line => {
+    const trimmed = line.trim();
+    if (trimmed && !trimmed.startsWith('#')) {
+      const index = trimmed.indexOf('=');
+      if (index !== -1) {
+        const key = trimmed.substring(0, index).trim();
+        const val = trimmed.substring(index + 1).trim().replace(/^['"]|['"]$/g, '');
+        process.env[key] = val;
+      }
+    }
+  });
+}
+
+const SUPERADMIN_EMAIL = process.env.SUPERADMIN_EMAIL || 'salihyurek004@gmail.com';
+const SUPERADMIN_PASSWORD = process.env.SUPERADMIN_PASSWORD || 'Ej+D8q6zhg3kRX*';
+
+
 function hashPassword(password) {
   return bcrypt.hashSync(password, 10);
 }
@@ -41,8 +62,8 @@ function initDb() {
       users: [
         {
           id: 'user-superadmin',
-          email: 'salihyurek004@gmail.com',
-          password: hashPassword('Ej+D8q6zhg3kRX*'),
+          email: SUPERADMIN_EMAIL,
+          password: hashPassword(SUPERADMIN_PASSWORD),
           role: 'superadmin',
           resetToken: null,
           resetTokenExpiry: null
@@ -167,13 +188,13 @@ function readDb() {
       migrated = true;
     }
     
-    // Check if salihyurek004@gmail.com is seeded
-    const superAdminExists = parsed.users.some(u => u.email.toLowerCase() === 'salihyurek004@gmail.com');
+    // Check if superadmin is seeded
+    const superAdminExists = parsed.users.some(u => u.email.toLowerCase() === SUPERADMIN_EMAIL.toLowerCase());
     if (!superAdminExists) {
       parsed.users.push({
         id: 'user-superadmin',
-        email: 'salihyurek004@gmail.com',
-        password: hashPassword('Ej+D8q6zhg3kRX*'),
+        email: SUPERADMIN_EMAIL,
+        password: hashPassword(SUPERADMIN_PASSWORD),
         role: 'superadmin',
         resetToken: null,
         resetTokenExpiry: null
@@ -190,7 +211,7 @@ function readDb() {
     
     // Ensure all users have roles & reset fields
     parsed.users.forEach(u => {
-      if (u.email.toLowerCase() === 'salihyurek004@gmail.com') {
+      if (u.email.toLowerCase() === SUPERADMIN_EMAIL.toLowerCase()) {
         if (u.role !== 'superadmin') {
           u.role = 'superadmin';
           migrated = true;
@@ -246,5 +267,7 @@ module.exports = {
   readDb,
   writeDb,
   hashPassword,
-  comparePassword
+  comparePassword,
+  SUPERADMIN_EMAIL,
+  SUPERADMIN_PASSWORD
 };
