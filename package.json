@@ -6,12 +6,12 @@
   "scripts": {
     "dev": "concurrently -k -p \"[{name}]\" -n \"client,server\" -c \"cyan,green\" \"npm run client\" \"npm run server\"",
     "client": "vite",
-    "server": "npm --prefix server run dev",
+    "server": "dotnet run --project server/server.csproj",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "start": "npm --prefix server start",
-    "server-install": "npm --prefix server install"
+    "start": "dotnet run --project server/server.csproj --configuration Release",
+    "server-install": "dotnet restore server/server.csproj"
   },
   "dependencies": {
     "lucide-react": "^1.17.0",

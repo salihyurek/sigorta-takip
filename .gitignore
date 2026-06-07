@@ -31,3 +31,10 @@ dist-ssr
 # Database file
 data/db.json
 
+# .NET Build Outputs
+server/bin/
+server/obj/
+**/bin/
+**/obj/
+
+
