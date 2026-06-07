@@ -71,28 +71,36 @@ namespace SigortaTakip.Controllers
                 var validationError = ValidateBus(req.Plate, req.Brand, req.Operator, req.Policies);
                 if (validationError != null) return BadRequest(new { error = validationError });
 
-                var data = Db.ReadDb();
-
                 var normalizedPlate = NormalizePlate(req.Plate);
-                if (data.Buses.Any(b => NormalizePlate(b.Plate) == normalizedPlate))
+                string? error = null;
+                Bus? newBus = null;
+
+                // Uniqueness check + insert in one atomic step so two concurrent creates
+                // can't both slip past the duplicate-plate check.
+                Db.Update(data =>
                 {
-                    return BadRequest(new { error = "Bu plakaya sahip bir araç zaten kayıtlı!" });
-                }
+                    if (data.Buses.Any(b => NormalizePlate(b.Plate) == normalizedPlate))
+                    {
+                        error = "Bu plakaya sahip bir araç zaten kayıtlı!";
+                        return false;
+                    }
 
-                var newBus = new Bus
-                {
-                    Id = "bus-" + DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                    Plate = req.Plate.ToUpperInvariant().Trim(),
-                    Brand = req.Brand.Trim(),
-                    Operator = req.Operator.Trim(),
-                    Policies = PolicyKeys.ToDictionary(
-                        key => key,
-                        key => BuildPolicy(req.Policies[key], null))
-                };
+                    newBus = new Bus
+                    {
+                        Id = "bus-" + DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                        Plate = req.Plate.ToUpperInvariant().Trim(),
+                        Brand = req.Brand.Trim(),
+                        Operator = req.Operator.Trim(),
+                        Policies = PolicyKeys.ToDictionary(
+                            key => key,
+                            key => BuildPolicy(req.Policies[key], null))
+                    };
 
-                data.Buses.Insert(0, newBus);
-                Db.WriteDb(data);
+                    data.Buses.Insert(0, newBus);
+                    return true;
+                });
 
+                if (error != null) return BadRequest(new { error });
                 return StatusCode(201, newBus);
             }
             catch (Exception ex)
@@ -115,7 +123,9 @@ namespace SigortaTakip.Controllers
                     return BadRequest(new { error = "İçe aktarılacak araç verisi bulunamadı." });
                 }
 
-                // Validate everything up front so a bad row aborts the whole import.
+                // Validate everything up front so a bad record aborts the whole import.
+                // The client strips empty rows before sending, so we can't map an index
+                // back to a spreadsheet row number — identify the offender by plate instead.
                 for (int i = 0; i < req.Count; i++)
                 {
                     var busReq = req[i];
@@ -124,52 +134,54 @@ namespace SigortaTakip.Controllers
                     var error = ValidateBus(busReq.Plate, busReq.Brand, busReq.Operator, busReq.Policies);
                     if (error != null)
                     {
-                        return BadRequest(new { error = $"Satır {i + 2} ({busReq.Plate}): {error}" });
+                        return BadRequest(new { error = $"{busReq.Plate}: {error}" });
                     }
                 }
 
-                var data = Db.ReadDb();
                 int importedCount = 0;
                 int updatedCount = 0;
 
-                foreach (var busReq in req)
+                Db.Update(data =>
                 {
-                    if (ValidateBus(busReq.Plate, busReq.Brand, busReq.Operator, busReq.Policies) != null)
+                    foreach (var busReq in req)
                     {
-                        continue; // Skip invalid/empty rows
-                    }
-
-                    var normalizedPlate = NormalizePlate(busReq.Plate);
-                    var existingBusIndex = data.Buses.FindIndex(b => NormalizePlate(b.Plate) == normalizedPlate);
-                    var existingBus = existingBusIndex != -1 ? data.Buses[existingBusIndex] : null;
-
-                    var newPolicies = PolicyKeys.ToDictionary(
-                        key => key,
-                        key => BuildPolicy(busReq.Policies[key],
-                            existingBus?.Policies.TryGetValue(key, out var op) == true ? op : null));
-
-                    if (existingBus != null)
-                    {
-                        existingBus.Brand = busReq.Brand.Trim();
-                        existingBus.Operator = busReq.Operator.Trim();
-                        existingBus.Policies = newPolicies;
-                        updatedCount++;
-                    }
-                    else
-                    {
-                        data.Buses.Insert(0, new Bus
+                        if (ValidateBus(busReq.Plate, busReq.Brand, busReq.Operator, busReq.Policies) != null)
                         {
-                            Id = "bus-" + (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + importedCount),
-                            Plate = busReq.Plate.ToUpperInvariant().Trim(),
-                            Brand = busReq.Brand.Trim(),
-                            Operator = busReq.Operator.Trim(),
-                            Policies = newPolicies
-                        });
-                        importedCount++;
-                    }
-                }
+                            continue; // Skip invalid/empty rows
+                        }
 
-                Db.WriteDb(data);
+                        var normalizedPlate = NormalizePlate(busReq.Plate);
+                        var existingBusIndex = data.Buses.FindIndex(b => NormalizePlate(b.Plate) == normalizedPlate);
+                        var existingBus = existingBusIndex != -1 ? data.Buses[existingBusIndex] : null;
+
+                        var newPolicies = PolicyKeys.ToDictionary(
+                            key => key,
+                            key => BuildPolicy(busReq.Policies[key],
+                                existingBus?.Policies.TryGetValue(key, out var op) == true ? op : null));
+
+                        if (existingBus != null)
+                        {
+                            existingBus.Brand = busReq.Brand.Trim();
+                            existingBus.Operator = busReq.Operator.Trim();
+                            existingBus.Policies = newPolicies;
+                            updatedCount++;
+                        }
+                        else
+                        {
+                            data.Buses.Insert(0, new Bus
+                            {
+                                Id = "bus-" + (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + importedCount),
+                                Plate = busReq.Plate.ToUpperInvariant().Trim(),
+                                Brand = busReq.Brand.Trim(),
+                                Operator = busReq.Operator.Trim(),
+                                Policies = newPolicies
+                            });
+                            importedCount++;
+                        }
+                    }
+                    return true;
+                });
+
                 return Ok(new { success = true, importedCount, updatedCount });
             }
             catch (Exception ex)
@@ -190,32 +202,41 @@ namespace SigortaTakip.Controllers
                 var validationError = ValidateBus(req.Plate, req.Brand, req.Operator, req.Policies);
                 if (validationError != null) return BadRequest(new { error = validationError });
 
-                var data = Db.ReadDb();
-                var busIndex = data.Buses.FindIndex(b => b.Id == id);
-                if (busIndex == -1) return NotFound(new { error = "Araç bulunamadı." });
-
                 var normalizedPlate = NormalizePlate(req.Plate);
-                if (data.Buses.Any(b => b.Id != id && NormalizePlate(b.Plate) == normalizedPlate))
+                bool notFound = false;
+                string? error = null;
+                Bus? updatedBus = null;
+
+                Db.Update(data =>
                 {
-                    return BadRequest(new { error = "Bu plakaya sahip başka bir araç zaten kayıtlı!" });
-                }
+                    var busIndex = data.Buses.FindIndex(b => b.Id == id);
+                    if (busIndex == -1) { notFound = true; return false; }
 
-                var oldBus = data.Buses[busIndex];
-                var updatedBus = new Bus
-                {
-                    Id = oldBus.Id,
-                    Plate = req.Plate.ToUpperInvariant().Trim(),
-                    Brand = req.Brand.Trim(),
-                    Operator = req.Operator.Trim(),
-                    Policies = PolicyKeys.ToDictionary(
-                        key => key,
-                        key => BuildPolicy(req.Policies[key],
-                            oldBus.Policies.TryGetValue(key, out var op) ? op : null))
-                };
+                    if (data.Buses.Any(b => b.Id != id && NormalizePlate(b.Plate) == normalizedPlate))
+                    {
+                        error = "Bu plakaya sahip başka bir araç zaten kayıtlı!";
+                        return false;
+                    }
 
-                data.Buses[busIndex] = updatedBus;
-                Db.WriteDb(data);
+                    var oldBus = data.Buses[busIndex];
+                    updatedBus = new Bus
+                    {
+                        Id = oldBus.Id,
+                        Plate = req.Plate.ToUpperInvariant().Trim(),
+                        Brand = req.Brand.Trim(),
+                        Operator = req.Operator.Trim(),
+                        Policies = PolicyKeys.ToDictionary(
+                            key => key,
+                            key => BuildPolicy(req.Policies[key],
+                                oldBus.Policies.TryGetValue(key, out var op) ? op : null))
+                    };
 
+                    data.Buses[busIndex] = updatedBus;
+                    return true;
+                });
+
+                if (notFound) return NotFound(new { error = "Araç bulunamadı." });
+                if (error != null) return BadRequest(new { error });
                 return Ok(updatedBus);
             }
             catch (Exception ex)
@@ -233,16 +254,16 @@ namespace SigortaTakip.Controllers
 
             try
             {
-                var data = Db.ReadDb();
-                var initialLength = data.Buses.Count;
-                data.Buses = data.Buses.Where(b => b.Id != id).ToList();
-
-                if (data.Buses.Count == initialLength)
+                bool found = false;
+                Db.Update(data =>
                 {
-                    return NotFound(new { error = "Araç bulunamadı." });
-                }
+                    var initialLength = data.Buses.Count;
+                    data.Buses = data.Buses.Where(b => b.Id != id).ToList();
+                    found = data.Buses.Count != initialLength;
+                    return found;
+                });
 
-                Db.WriteDb(data);
+                if (!found) return NotFound(new { error = "Araç bulunamadı." });
                 return Ok(new { success = true, message = "Araç silindi." });
             }
             catch (Exception ex)

@@ -105,25 +105,27 @@ namespace SigortaTakip.Controllers
                     return BadRequest(new { error = passwordError });
                 }
 
-                var data = Db.ReadDb();
-                var user = data.Users.FirstOrDefault(u => string.Equals(u.Email, CurrentUserEmail, StringComparison.OrdinalIgnoreCase));
+                bool notFound = false;
+                bool wrongOld = false;
+                string? userEmail = null;
 
-                if (user == null)
+                Db.Update(data =>
                 {
-                    return NotFound(new { error = "Kullanıcı bulunamadı." });
-                }
+                    var user = data.Users.FirstOrDefault(u => string.Equals(u.Email, CurrentUserEmail, StringComparison.OrdinalIgnoreCase));
+                    if (user == null) { notFound = true; return false; }
+                    if (!Auth.ComparePassword(req.OldPassword, user.Password)) { wrongOld = true; return false; }
 
-                if (!Auth.ComparePassword(req.OldPassword, user.Password))
-                {
-                    return BadRequest(new { error = "Eski şifreniz hatalı!" });
-                }
+                    user.Password = Auth.HashPassword(req.NewPassword);
+                    userEmail = user.Email;
+                    return true;
+                });
 
-                user.Password = Auth.HashPassword(req.NewPassword);
-                Db.WriteDb(data);
+                if (notFound) return NotFound(new { error = "Kullanıcı bulunamadı." });
+                if (wrongOld) return BadRequest(new { error = "Eski şifreniz hatalı!" });
 
                 // Invalidate the user's other sessions but keep the current one alive,
                 // so changing your own password doesn't immediately log you out.
-                Auth.DeleteAllSessionsForUser(user.Email, CurrentToken);
+                Auth.DeleteAllSessionsForUser(userEmail!, CurrentToken);
 
                 return Ok(new { success = true, message = "Şifreniz başarıyla güncellendi." });
             }
@@ -156,11 +158,11 @@ namespace SigortaTakip.Controllers
                 var successMessage = "Eğer bu e-posta adresi sistemde kayıtlıysa, şifre sıfırlama bağlantısı gönderilecektir.";
 
                 var data = Db.ReadDb();
+                var settings = data.Settings;
                 var user = data.Users.FirstOrDefault(u => string.Equals(u.Email.Trim(), req.Email.Trim(), StringComparison.OrdinalIgnoreCase));
 
                 if (user != null)
                 {
-                    var settings = data.Settings;
                     if (settings == null || string.IsNullOrWhiteSpace(settings.SmtpHost) || string.IsNullOrWhiteSpace(settings.SmtpUser))
                     {
                         // Log for the admin, but do not reveal anything to the caller.
@@ -171,9 +173,17 @@ namespace SigortaTakip.Controllers
                         byte[] randomBytes = new byte[20];
                         RandomNumberGenerator.Fill(randomBytes);
                         var resetToken = Convert.ToHexString(randomBytes).ToLowerInvariant();
-                        user.ResetToken = resetToken;
-                        user.ResetTokenExpiry = DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeMilliseconds();
-                        Db.WriteDb(data);
+                        var expiry = DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeMilliseconds();
+
+                        // Persist only the hash; the raw token travels in the email link.
+                        Db.Update(d =>
+                        {
+                            var u = d.Users.FirstOrDefault(x => string.Equals(x.Email, user.Email, StringComparison.OrdinalIgnoreCase));
+                            if (u == null) return false;
+                            u.ResetToken = AuthService.HashToken(resetToken);
+                            u.ResetTokenExpiry = expiry;
+                            return true;
+                        });
 
                         string? origin = Request.Headers["Origin"];
                         if (string.IsNullOrEmpty(origin))
@@ -230,26 +240,34 @@ namespace SigortaTakip.Controllers
                     return BadRequest(new { error = passwordError });
                 }
 
-                var data = Db.ReadDb();
+                var hashedToken = AuthService.HashToken(req.Token);
                 var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                bool invalid = false;
+                string? userEmail = null;
 
-                var user = data.Users.FirstOrDefault(u => 
-                    u.ResetToken == req.Token && 
-                    u.ResetTokenExpiry.HasValue && 
-                    u.ResetTokenExpiry.Value > nowMs);
+                Db.Update(data =>
+                {
+                    var user = data.Users.FirstOrDefault(u =>
+                        u.ResetToken == hashedToken &&
+                        u.ResetTokenExpiry.HasValue &&
+                        u.ResetTokenExpiry.Value > nowMs);
 
-                if (user == null)
+                    if (user == null) { invalid = true; return false; }
+
+                    user.Password = Auth.HashPassword(req.Password);
+                    user.ResetToken = null;
+                    user.ResetTokenExpiry = null;
+                    userEmail = user.Email;
+                    return true;
+                });
+
+                if (invalid)
                 {
                     return BadRequest(new { error = "Geçersiz veya süresi dolmuş sıfırlama bağlantısı!" });
                 }
 
-                user.Password = Auth.HashPassword(req.Password);
-                user.ResetToken = null;
-                user.ResetTokenExpiry = null;
-                Db.WriteDb(data);
-
                 // Invalidate all other sessions for this user
-                Auth.DeleteAllSessionsForUser(user.Email);
+                Auth.DeleteAllSessionsForUser(userEmail!);
 
                 return Ok(new { success = true, message = "Şifreniz başarıyla yenilendi! Yeni şifrenizle giriş yapabilirsiniz." });
             }

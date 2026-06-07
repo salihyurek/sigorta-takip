@@ -146,7 +146,8 @@ export default function App() {
   }, [addToast, handleApiResponse, safeJsonParse, token]);
 
   const fetchSettings = useCallback(async () => {
-    if (!token) return;
+    // SMTP settings are superadmin-only on the server; viewers never request them.
+    if (!token || role !== 'superadmin') return;
     try {
       const res = await fetch('/api/settings', {
         headers: { 'Authorization': `Bearer ${token}` }
@@ -156,9 +157,12 @@ export default function App() {
       if (!res.ok) throw new Error(data.error || 'Ayarlar yüklenemedi');
       setSettings(data);
     } catch (err: unknown) {
-      console.error(err);
+      const message = getErrorMessage(err, 'Ayarlar yüklenirken hata oluştu.');
+      if (message !== 'Unauthorized') {
+        addToast('error', message);
+      }
     }
-  }, [handleApiResponse, safeJsonParse, token]);
+  }, [addToast, handleApiResponse, safeJsonParse, token, role]);
 
   useEffect(() => {
     if (token) {
@@ -582,7 +586,9 @@ export default function App() {
           />
         )}
         
-        {activeTab === 'settings' && settings && (
+        {/* Superadmins wait for settings to load; viewers only need the password
+            form, so they see the tab immediately (settings stays null for them). */}
+        {activeTab === 'settings' && (isSuperAdmin ? settings !== null : true) && (
           <Settings
             settings={settings}
             onSaveSettings={handleSaveSettings}

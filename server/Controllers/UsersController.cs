@@ -79,26 +79,34 @@ namespace SigortaTakip.Controllers
                 var passwordError = ValidatePasswordStrength(req.Password);
                 if (passwordError != null) return BadRequest(new { error = passwordError });
 
-                var data = Db.ReadDb();
-                if (data.Users.Any(u => string.Equals(u.Email.Trim(), req.Email.Trim(), StringComparison.OrdinalIgnoreCase)))
+                bool duplicate = false;
+                User? newUser = null;
+
+                // Duplicate-email check + insert atomically.
+                Db.Update(data =>
                 {
-                    return BadRequest(new { error = "Bu e-posta adresi zaten yetkilendirilmiş!" });
-                }
+                    if (data.Users.Any(u => string.Equals(u.Email.Trim(), req.Email.Trim(), StringComparison.OrdinalIgnoreCase)))
+                    {
+                        duplicate = true;
+                        return false;
+                    }
 
-                var newUser = new User
-                {
-                    Id = "user-" + DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                    Email = req.Email.ToLowerInvariant().Trim(),
-                    Password = Auth.HashPassword(req.Password),
-                    Role = role,
-                    ResetToken = null,
-                    ResetTokenExpiry = null
-                };
+                    newUser = new User
+                    {
+                        Id = "user-" + DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                        Email = req.Email.ToLowerInvariant().Trim(),
+                        Password = Auth.HashPassword(req.Password),
+                        Role = role,
+                        ResetToken = null,
+                        ResetTokenExpiry = null
+                    };
 
-                data.Users.Add(newUser);
-                Db.WriteDb(data);
+                    data.Users.Add(newUser);
+                    return true;
+                });
 
-                return StatusCode(201, new { id = newUser.Id, email = newUser.Email, role = newUser.Role });
+                if (duplicate) return BadRequest(new { error = "Bu e-posta adresi zaten yetkilendirilmiş!" });
+                return StatusCode(201, new { id = newUser!.Id, email = newUser.Email, role = newUser.Role });
             }
             catch (Exception ex)
             {
@@ -137,17 +145,25 @@ namespace SigortaTakip.Controllers
                     return BadRequest(new { error = "Kendi yetkinizi değiştiremezsiniz." });
                 }
 
-                var data = Db.ReadDb();
-                var user = data.Users.FirstOrDefault(u => string.Equals(u.Email, targetEmail, StringComparison.OrdinalIgnoreCase));
-                if (user == null) return NotFound(new { error = "Kullanıcı bulunamadı." });
+                bool notFound = false;
+                string? affectedEmail = null;
 
-                user.Role = role;
-                Db.WriteDb(data);
+                Db.Update(data =>
+                {
+                    var user = data.Users.FirstOrDefault(u => string.Equals(u.Email, targetEmail, StringComparison.OrdinalIgnoreCase));
+                    if (user == null) { notFound = true; return false; }
+
+                    user.Role = role;
+                    affectedEmail = user.Email;
+                    return true;
+                });
+
+                if (notFound) return NotFound(new { error = "Kullanıcı bulunamadı." });
 
                 // Force the affected user to re-authenticate so the new role takes effect.
-                Auth.DeleteAllSessionsForUser(user.Email);
+                Auth.DeleteAllSessionsForUser(affectedEmail!);
 
-                return Ok(new { success = true, email = user.Email, role = user.Role });
+                return Ok(new { success = true, email = affectedEmail, role });
             }
             catch (Exception ex)
             {
@@ -175,20 +191,30 @@ namespace SigortaTakip.Controllers
                     return BadRequest(new { error = "Ana yönetici hesabı silinemez." });
                 }
 
-                var data = Db.ReadDb();
-                var userIndex = data.Users.FindIndex(u => string.Equals(u.Email, targetEmail, StringComparison.OrdinalIgnoreCase));
-                if (userIndex == -1) return NotFound(new { error = "Kullanıcı bulunamadı." });
+                bool notFound = false;
+                bool lastAdmin = false;
 
-                // Never leave the system without at least one superadmin.
-                var target = data.Users[userIndex];
-                if (string.Equals(target.Role, "superadmin", StringComparison.OrdinalIgnoreCase) &&
-                    data.Users.Count(u => string.Equals(u.Role, "superadmin", StringComparison.OrdinalIgnoreCase)) <= 1)
+                // Find + last-superadmin check + remove atomically, so a concurrent
+                // delete/demote can't drop the system below one superadmin.
+                Db.Update(data =>
                 {
-                    return BadRequest(new { error = "Sistemde en az bir yönetici bulunmalıdır." });
-                }
+                    var userIndex = data.Users.FindIndex(u => string.Equals(u.Email, targetEmail, StringComparison.OrdinalIgnoreCase));
+                    if (userIndex == -1) { notFound = true; return false; }
 
-                data.Users.RemoveAt(userIndex);
-                Db.WriteDb(data);
+                    var target = data.Users[userIndex];
+                    if (string.Equals(target.Role, "superadmin", StringComparison.OrdinalIgnoreCase) &&
+                        data.Users.Count(u => string.Equals(u.Role, "superadmin", StringComparison.OrdinalIgnoreCase)) <= 1)
+                    {
+                        lastAdmin = true;
+                        return false;
+                    }
+
+                    data.Users.RemoveAt(userIndex);
+                    return true;
+                });
+
+                if (notFound) return NotFound(new { error = "Kullanıcı bulunamadı." });
+                if (lastAdmin) return BadRequest(new { error = "Sistemde en az bir yönetici bulunmalıdır." });
 
                 Auth.DeleteAllSessionsForUser(targetEmail);
 

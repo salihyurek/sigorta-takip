@@ -18,6 +18,11 @@ namespace SigortaTakip.Services
         private int _lastRunHour = -1;
         private DateTime _lastRunDate = DateTime.MinValue;
 
+        // Serializes expiry checks so the scheduled run and a manual "check now" trigger
+        // can't run concurrently — that would let both read the same pre-notification
+        // state and send duplicate emails / clobber each other's threshold writes.
+        private readonly SemaphoreSlim _runLock = new(1, 1);
+
         public SchedulerService(DbService dbService, MailService mailService, TimeService time)
         {
             _dbService = dbService;
@@ -29,7 +34,7 @@ namespace SigortaTakip.Services
 
         // Thresholds at which we send a warning, e.g. 15/7/1 days before and on expiry (0).
         // 0 is always included so the expiry day itself is never missed.
-        private static int[] ParseReminderDays(string? raw)
+        internal static int[] ParseReminderDays(string? raw)
         {
             var defaults = new[] { 15, 7, 1, 0 };
             if (string.IsNullOrWhiteSpace(raw)) return defaults;
@@ -109,7 +114,7 @@ namespace SigortaTakip.Services
             }
         }
 
-        private static int? DaysRemaining(string endDate, DateTime today)
+        internal static int? DaysRemaining(string endDate, DateTime today)
         {
             if (!DateTime.TryParseExact(endDate, "yyyy-MM-dd", CultureInfo.InvariantCulture,
                     DateTimeStyles.None, out var end))
@@ -121,10 +126,12 @@ namespace SigortaTakip.Services
 
         // Most urgent reached threshold for a given days-remaining value, or null if none.
         // Smaller threshold = more urgent. Expired policies (negative days) map to 0.
-        private int? CurrentThreshold(int daysRemaining)
+        private int? CurrentThreshold(int daysRemaining) => CurrentThreshold(daysRemaining, _reminderDays);
+
+        internal static int? CurrentThreshold(int daysRemaining, int[] reminderDays)
         {
             int? bucket = null;
-            foreach (var t in _reminderDays)
+            foreach (var t in reminderDays)
             {
                 if (daysRemaining <= t)
                 {
@@ -136,6 +143,7 @@ namespace SigortaTakip.Services
 
         public async Task<int> CheckAllExpiriesAsync()
         {
+            await _runLock.WaitAsync();
             try
             {
                 var now = _time.Now;
@@ -205,6 +213,10 @@ namespace SigortaTakip.Services
             {
                 Console.WriteLine($"[Scheduler] Exception in CheckAllExpiriesAsync: {ex.Message}");
                 return 0;
+            }
+            finally
+            {
+                _runLock.Release();
             }
         }
     }

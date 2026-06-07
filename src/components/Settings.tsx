@@ -4,7 +4,7 @@ import { Mail, Shield, Save, RefreshCw, Download, Upload, AlertCircle, CheckCirc
 import { exportBusesToExcel, importBusesFromExcel } from '../utils/excelHelpers';
 
 interface SettingsProps {
-  settings: SMTPConfig;
+  settings: SMTPConfig | null;
   onSaveSettings: (settings: SMTPConfig) => Promise<void>;
   onTestEmail: (settings: SMTPConfig) => Promise<void>;
   onRestoreDb: (data: BackupData) => Promise<void>;
@@ -497,6 +497,12 @@ export const Settings = ({
                   onChange={(e) => setSmtpPort(Number(e.target.value))}
                   required={enableEmails}
                 />
+                {smtpPort === 465 && (
+                  <span style={{ fontSize: '0.75rem', color: 'var(--warning)', marginTop: '0.35rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                    <AlertCircle size={13} style={{ flexShrink: 0 }} />
+                    Port 465 (örtük SSL) desteklenmiyor. STARTTLS için 587 kullanın.
+                  </span>
+                )}
               </div>
 
               <div className="form-group">

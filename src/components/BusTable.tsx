@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { Bus } from '../types';
-import { getPolicyStatus, getDaysRemaining, formatDate } from '../utils/dateHelpers';
+import { getPolicyStatus, getDaysRemaining, formatDate, SOON_THRESHOLD_DAYS } from '../utils/dateHelpers';
 import { Search, Edit2, Trash2, Shield, Calendar, AlertOctagon, SlidersHorizontal, ChevronLeft, ChevronRight } from 'lucide-react';
 
 const PAGE_SIZE = 10;
@@ -211,7 +211,7 @@ export const BusTable = ({ buses, onEditBus, onDeleteBus, isSuperAdmin = true }:
               <option value="all">Tüm Durumlar</option>
               <option value="expired">Günü Geçenler var</option>
               <option value="today">Bugün Bitenler var</option>
-              <option value="soon">15 Gün Kalanlar var</option>
+              <option value="soon">{SOON_THRESHOLD_DAYS} Gün Kalanlar var</option>
               <option value="active">Tümü Güvenli (Aktif)</option>
             </select>
           </div>

@@ -22,7 +22,7 @@ jobs:
       - run: npm run build
 
   backend:
-    name: Backend (build)
+    name: Backend (build, test)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,3 +31,4 @@ jobs:
           dotnet-version: '10.0.x'
       - run: dotnet restore server/server.csproj
       - run: dotnet build server/server.csproj -c Release --no-restore
+      - run: dotnet test server.Tests/server.Tests.csproj -c Release

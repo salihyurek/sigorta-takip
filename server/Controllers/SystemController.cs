@@ -67,24 +67,22 @@ namespace SigortaTakip.Controllers
                     }
                 }
 
-                var currentData = Db.ReadDb();
-
-                var restoredSettings = req.Settings ?? currentData.Settings;
-                // Backups never contain the real SMTP password (it's masked on export),
-                // so don't let a masked/empty value overwrite the working password.
-                if (restoredSettings.SmtpPass == "********" || string.IsNullOrEmpty(restoredSettings.SmtpPass))
+                Db.Update(data =>
                 {
-                    restoredSettings.SmtpPass = currentData.Settings.SmtpPass;
-                }
+                    var restoredSettings = req.Settings ?? data.Settings;
+                    // Backups never contain the real SMTP password (it's masked on export),
+                    // so don't let a masked/empty value overwrite the working password.
+                    if (restoredSettings.SmtpPass == "********" || string.IsNullOrEmpty(restoredSettings.SmtpPass))
+                    {
+                        restoredSettings.SmtpPass = data.Settings.SmtpPass;
+                    }
 
-                var data = new DatabaseData
-                {
-                    Settings = restoredSettings,
-                    Buses = req.Buses,
-                    Users = currentData.Users // Preserve users!
-                };
+                    data.Settings = restoredSettings;
+                    data.Buses = req.Buses;
+                    // data.Users is left untouched to preserve existing accounts.
+                    return true;
+                });
 
-                Db.WriteDb(data);
                 return Ok(new { success = true, message = "Veritabanı başarıyla geri yüklendi" });
             }
             catch (Exception ex)

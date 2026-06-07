@@ -32,6 +32,7 @@ cp .env.example .env
 | `APP_TIMEZONE` | Hayır | İş saat dilimi (IANA). Varsayılan `Europe/Istanbul` |
 | `REMINDER_DAYS` | Hayır | Hatırlatma günleri (virgülle). Varsayılan `15,7,1,0` (0 her zaman dahildir) |
 | `ALLOWED_ORIGINS` | Hayır | Ek CORS kaynakları. Aynı origin sunumda gerekmez |
+| `TRUST_PROXY` | Hayır | Güvenilir ters proxy (örn. Render) arkasındaysa `true` yapın; gerçek istemci IP'si için `X-Forwarded-For` dikkate alınır (rate limit). Tek proxy varsayar. Doğrudan erişimde **boş bırakın** |
 | `PORT` | Hayır | Sunucu portu (bulut sağlayıcılar genelde otomatik atar) |
 
 ## Çalıştırma
@@ -53,8 +54,11 @@ npm run start
 ## Test ve Lint
 
 ```bash
-npm test    # node yerleşik test çalıştırıcısı (ek bağımlılık yok)
+npm test    # frontend: node yerleşik test çalıştırıcısı (ek bağımlılık yok)
 npm run lint
+
+# backend: doğrulama / hatırlatma eşiği / kimlik doğrulama saf mantığı için xUnit
+dotnet test server.Tests/server.Tests.csproj
 ```
 
 ## E-posta Bildirimleri
@@ -72,3 +76,8 @@ Tüm veriler `DATA_DIR` (varsayılan `data/`) altında `db.json` dosyasında tut
 > **Bulut dağıtımı (Render vb.):** Konteyner dosya sistemi geçicidir. Kalıcı bir disk bağlayıp `DATA_DIR`'i o bağlama noktasına ayarlamazsanız her yeniden dağıtımda tüm veriler (araçlar, kullanıcılar, ayarlar) silinir. Dockerfile `/app/data` için bir `VOLUME` tanımlar.
 
 Arayüzdeki `Yedek İndir` butonu ile JSON yedeği alabilirsiniz. Güvenlik nedeniyle SMTP şifresi yedeğe dahil edilmez; geri yükleme sırasında mevcut SMTP şifreniz korunur.
+
+## Bilinen Sınırlamalar
+
+- **Tek instance:** Veri tek bir `db.json` dosyasında, oturumlar bellek + `sessions.json` içinde tutulur. Uygulama **birden fazla instance ile ölçeklenmez** (örn. Render'da >1 instance açmayın); birden fazla kopya veriyi ve oturumları tutarsız hale getirir. Çok-instance gerekirse paylaşımlı bir veritabanına (örn. SQLite/PostgreSQL) geçiş gerekir.
+- **Tarih hesabı saat dilimi:** Arayüzdeki "kalan gün" hesabı tarayıcının yerel saat dilimini, sunucu tarafı (e-posta) ise `APP_TIMEZONE`'u kullanır. Türkiye'deki kullanıcılar için pratikte fark oluşmaz; çok farklı saat dilimindeki bir tarayıcıda gösterilen kalan gün ±1 sapabilir.

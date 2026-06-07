@@ -11,4 +11,9 @@
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.8" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Expose internal pure-logic helpers (validation, reminder thresholds) to the test project. -->
+    <InternalsVisibleTo Include="SigortaTakip.Tests" />
+  </ItemGroup>
+
 </Project>

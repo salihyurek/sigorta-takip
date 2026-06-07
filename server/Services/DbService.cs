@@ -221,6 +221,26 @@ namespace SigortaTakip.Services
             }
         }
 
+        /// <summary>
+        /// Atomically read-modify-write the database under a single lock. The previous
+        /// pattern of calling ReadDb() then WriteDb() from a controller left a TOCTOU
+        /// window where two concurrent requests could both pass a uniqueness check (e.g.
+        /// duplicate plate) or clobber each other's edits. The mutate callback receives
+        /// the freshly-read data (SMTP password decrypted) and returns true if it changed
+        /// anything; only then is the result persisted. The lock is reentrant so the
+        /// nested ReadDb/WriteDb calls are safe on the same thread.
+        /// </summary>
+        public bool Update(Func<DatabaseData, bool> mutate)
+        {
+            lock (_lock)
+            {
+                var data = ReadDb();
+                var changed = mutate(data);
+                if (!changed) return true;
+                return WriteDb(data);
+            }
+        }
+
         private string EncryptPassword(string? plain)
         {
             if (string.IsNullOrEmpty(plain)) return "";

@@ -1,3 +1,9 @@
+// Single source of truth for the "expiring soon" window (in days). The status
+// colours, the dashboard count/labels and the table filter all derive from this,
+// so it can never drift between them. Keep it aligned with the largest backend
+// REMINDER_DAYS threshold (default 15) so the UI warns when emails start going out.
+export const SOON_THRESHOLD_DAYS = 15;
+
 // Get today's local date in YYYY-MM-DD format
 export function getTodayString(): string {
   const date = new Date();
@@ -45,7 +51,7 @@ export function getPolicyStatus(endDateStr: string): 'expired' | 'today' | 'soon
   
   if (days < 0) return 'expired';
   if (days === 0) return 'today';
-  if (days <= 15) return 'soon';
+  if (days <= SOON_THRESHOLD_DAYS) return 'soon';
   return 'active';
 }
 

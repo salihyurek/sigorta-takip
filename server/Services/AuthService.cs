@@ -48,13 +48,26 @@ namespace SigortaTakip.Services
             });
         }
 
+        /// <summary>
+        /// SHA-256 of a token, used as the at-rest key. Tokens are 256-bit random values
+        /// so a fast hash is sufficient (no brute-forcing the preimage); this keeps the
+        /// raw bearer/reset tokens out of sessions.json / db.json on disk. Shared with
+        /// reset tokens so both are stored hashed.
+        /// </summary>
+        public static string HashToken(string token)
+        {
+            using var sha = SHA256.Create();
+            return Convert.ToHexString(sha.ComputeHash(Encoding.UTF8.GetBytes(token))).ToLowerInvariant();
+        }
+
         public string CreateSession(string email, string role)
         {
             byte[] randomBytes = new byte[32];
             RandomNumberGenerator.Fill(randomBytes);
             string token = Convert.ToHexString(randomBytes).ToLowerInvariant();
 
-            _sessions[token] = new SessionData
+            // Persist only the hash; the raw token is returned to the client once.
+            _sessions[HashToken(token)] = new SessionData
             {
                 Email = email,
                 Role = role,
@@ -67,14 +80,15 @@ namespace SigortaTakip.Services
 
         public SessionData? ValidateSession(string token)
         {
-            if (!_sessions.TryGetValue(token, out var session))
+            var key = HashToken(token);
+            if (!_sessions.TryGetValue(key, out var session))
             {
                 return null;
             }
 
             if (DateTime.UtcNow - session.CreatedAt > _sessionTtl)
             {
-                if (_sessions.TryRemove(token, out _)) SaveSessions();
+                if (_sessions.TryRemove(key, out _)) SaveSessions();
                 return null;
             }
 
@@ -83,7 +97,7 @@ namespace SigortaTakip.Services
 
         public void DeleteSession(string token)
         {
-            if (_sessions.TryRemove(token, out _)) SaveSessions();
+            if (_sessions.TryRemove(HashToken(token), out _)) SaveSessions();
         }
 
         public void DeleteAllSessionsForUser(string email)
@@ -98,10 +112,12 @@ namespace SigortaTakip.Services
         /// </summary>
         public void DeleteAllSessionsForUser(string email, string? exceptToken)
         {
+            // Keys are token hashes, so hash the raw exception token before comparing.
+            var exceptKey = string.IsNullOrEmpty(exceptToken) ? null : HashToken(exceptToken);
             var tokensToRemove = _sessions
                 .Where(kvp => string.Equals(kvp.Value.Email, email, StringComparison.OrdinalIgnoreCase))
                 .Select(kvp => kvp.Key)
-                .Where(t => exceptToken == null || !string.Equals(t, exceptToken, StringComparison.Ordinal))
+                .Where(t => exceptKey == null || !string.Equals(t, exceptKey, StringComparison.Ordinal))
                 .ToList();
 
             bool changed = false;

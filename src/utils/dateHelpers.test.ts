@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { getTodayString, getDaysRemaining, getPolicyStatus, formatDate } from './dateHelpers.ts';
+import { getTodayString, getDaysRemaining, getPolicyStatus, formatDate, SOON_THRESHOLD_DAYS } from './dateHelpers.ts';
 
 // Build a YYYY-MM-DD string for a local date `offset` days from today.
 function localDateString(offset: number): string {
@@ -45,4 +45,11 @@ test('getPolicyStatus classifies by days remaining', () => {
   assert.equal(getPolicyStatus(localDateString(15)), 'soon');
   assert.equal(getPolicyStatus(localDateString(16)), 'active');
   assert.equal(getPolicyStatus(''), 'expired');
+});
+
+test('getPolicyStatus "soon" boundary tracks SOON_THRESHOLD_DAYS', () => {
+  // The status logic and the UI labels both derive from this constant, so the
+  // boundary must follow it rather than a hard-coded 15.
+  assert.equal(getPolicyStatus(localDateString(SOON_THRESHOLD_DAYS)), 'soon');
+  assert.equal(getPolicyStatus(localDateString(SOON_THRESHOLD_DAYS + 1)), 'active');
 });

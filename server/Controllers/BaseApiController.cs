@@ -76,7 +76,7 @@ namespace SigortaTakip.Controllers
             return null;
         }
 
-        protected static bool IsValidDate(string dateStr)
+        internal static bool IsValidDate(string dateStr)
         {
             if (string.IsNullOrWhiteSpace(dateStr)) return false;
             if (!Regex.IsMatch(dateStr, @"^\d{4}-\d{2}-\d{2}$")) return false;
@@ -88,7 +88,7 @@ namespace SigortaTakip.Controllers
         /// Validates the core bus fields (lengths) and the three required policies'
         /// date formats / ordering. Returns an error message, or null if valid.
         /// </summary>
-        protected static string? ValidateBus(string? plate, string? brand, string? @operator, Dictionary<string, Policy>? policies)
+        internal static string? ValidateBus(string? plate, string? brand, string? @operator, Dictionary<string, Policy>? policies)
         {
             if (string.IsNullOrWhiteSpace(plate) || string.IsNullOrWhiteSpace(brand) ||
                 string.IsNullOrWhiteSpace(@operator) || policies == null)

@@ -6,16 +6,20 @@ type XlsxModule = typeof import('xlsx');
 let xlsxPromise: Promise<XlsxModule> | null = null;
 const loadXlsx = (): Promise<XlsxModule> => (xlsxPromise ??= import('xlsx'));
 
-// Robust helper to parse and format date values from Excel
-const formatExcelDate = (val: unknown): string => {
+// Robust helper to parse and format date values from Excel.
+// Exported for unit testing; the serial-number branch is timezone-sensitive.
+export const formatExcelDate = (val: unknown): string => {
   if (val === undefined || val === null) return '';
   
   // Handle Excel Serial Date numbers
   if (typeof val === 'number') {
-    // Excel leap year bug adjustment (Excel thinks 1900 was a leap year)
+    // 25569 = days between 1899-12-31 (Excel epoch, incl. its 1900 leap-year bug) and
+    // the Unix epoch. The result is a UTC midnight timestamp, so read it back with the
+    // UTC getters — using the local getters would shift the date a day in UTC-negative
+    // timezones (e.g. the Americas).
     const date = new Date(Math.round((val - 25569) * 86400 * 1000));
     if (isNaN(date.getTime())) return '';
-    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
   }
   
   const str = String(val).trim();
