@@ -74,7 +74,7 @@ namespace SigortaTakip.Controllers
 
                 Settings? saved = null;
 
-                Db.Update(data =>
+                var ok = Db.Update(data =>
                 {
                     // If client sends masked password, keep the old password
                     string smtpPass = newSettings.SmtpPass ?? "";
@@ -97,6 +97,8 @@ namespace SigortaTakip.Controllers
                     data.Settings = saved;
                     return true;
                 });
+
+                if (!ok) return StatusCode(500, new { error = "Ayarlar kaydedilemedi." });
 
                 // Mask password in response
                 var responseSettings = new Settings

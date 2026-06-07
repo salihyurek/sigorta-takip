@@ -154,36 +154,50 @@ namespace SigortaTakip.Services
             }
         }
 
-        /// <summary>Pure read. Returns settings with the SMTP password decrypted for in-app use.</summary>
+        /// <summary>Core read; assumes the lock is held. Throws if the file is unreadable
+        /// or malformed (callers decide how to react).</summary>
+        private DatabaseData ReadDbCore()
+        {
+            var json = File.ReadAllText(_dbFile);
+            var parsed = JsonSerializer.Deserialize<DatabaseData>(json) ?? new DatabaseData();
+            parsed.Users ??= new List<User>();
+            parsed.Buses ??= new List<Bus>();
+            parsed.Settings ??= new Settings();
+
+            parsed.Settings.SmtpPass = DecryptPassword(parsed.Settings.SmtpPass);
+            return parsed;
+        }
+
+        /// <summary>Snapshot the (presumably corrupt) db file aside for manual recovery.</summary>
+        private void BackupCorruptDb(Exception ex)
+        {
+            Console.WriteLine($"Error reading db.json: {ex.Message}");
+            try
+            {
+                var backupPath = $"{_dbFile}.corrupt.{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}";
+                if (File.Exists(_dbFile))
+                {
+                    File.Copy(_dbFile, backupPath);
+                    Console.WriteLine($"Corrupted db backed up to: {backupPath}");
+                }
+            }
+            catch { /* ignore */ }
+        }
+
+        /// <summary>Pure read. Returns settings with the SMTP password decrypted for in-app use.
+        /// On corruption it backs the file up and returns empty data (read-only callers degrade
+        /// gracefully); writers must use <see cref="Update"/>, which refuses to overwrite.</summary>
         public DatabaseData ReadDb()
         {
             lock (_lock)
             {
                 try
                 {
-                    var json = File.ReadAllText(_dbFile);
-                    var parsed = JsonSerializer.Deserialize<DatabaseData>(json) ?? new DatabaseData();
-                    parsed.Users ??= new List<User>();
-                    parsed.Buses ??= new List<Bus>();
-                    parsed.Settings ??= new Settings();
-
-                    parsed.Settings.SmtpPass = DecryptPassword(parsed.Settings.SmtpPass);
-                    return parsed;
+                    return ReadDbCore();
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"Error reading db.json: {ex.Message}");
-                    try
-                    {
-                        var backupPath = $"{_dbFile}.corrupt.{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}";
-                        if (File.Exists(_dbFile))
-                        {
-                            File.Copy(_dbFile, backupPath);
-                            Console.WriteLine($"Corrupted db backed up to: {backupPath}");
-                        }
-                    }
-                    catch { /* ignore */ }
-
+                    BackupCorruptDb(ex);
                     return new DatabaseData();
                 }
             }
@@ -234,7 +248,21 @@ namespace SigortaTakip.Services
         {
             lock (_lock)
             {
-                var data = ReadDb();
+                DatabaseData data;
+                try
+                {
+                    data = ReadDbCore();
+                }
+                catch (Exception ex)
+                {
+                    // Refuse to overwrite an unreadable/corrupt db with partial data — that
+                    // would turn a recoverable read error into permanent data loss. The
+                    // backup preserves the original; the caller gets false and surfaces 500.
+                    BackupCorruptDb(ex);
+                    Console.WriteLine("[Db] Aborting Update: database is unreadable, not overwriting.");
+                    return false;
+                }
+
                 var changed = mutate(data);
                 if (!changed) return true;
                 return WriteDb(data);

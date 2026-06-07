@@ -1,5 +1,7 @@
 # Stage 1: Build the React frontend
-FROM node:20-alpine AS frontend-builder
+# Node 24 matches CI and satisfies Vite 8's engine (^20.19 || >=22.12); the old
+# node:20-alpine pin was borderline against that requirement.
+FROM node:24-alpine AS frontend-builder
 WORKDIR /app
 COPY package*.json ./
 # Use a reproducible install from the lockfile.

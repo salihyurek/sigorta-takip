@@ -66,9 +66,9 @@ export const Login = ({ onLogin }: LoginProps) => {
       });
 
       const data = await safeJson(res);
-      if (!res.ok) throw new Error(data.error || 'Talep gönderilemedi.');
+      if (!res.ok) throw new Error(data?.error || 'Talep gönderilemedi.');
 
-      setForgotSuccess(data.message || 'Sıfırlama bağlantısı e-postanıza başarıyla gönderildi.');
+      setForgotSuccess(data?.message || 'Sıfırlama bağlantısı e-postanıza başarıyla gönderildi.');
       setForgotEmail('');
     } catch (err: unknown) {
       setError(getErrorMessage(err, 'Şifre sıfırlama talebi gönderilemedi.'));

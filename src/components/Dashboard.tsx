@@ -7,9 +7,10 @@ interface DashboardProps {
   onEditBus: (bus: Bus) => void;
   onCheckExpiries: () => void;
   isSuperAdmin?: boolean;
+  soonThreshold?: number;
 }
 
-export const Dashboard = ({ buses, onEditBus, onCheckExpiries, isSuperAdmin = true }: DashboardProps) => {
+export const Dashboard = ({ buses, onEditBus, onCheckExpiries, isSuperAdmin = true, soonThreshold = SOON_THRESHOLD_DAYS }: DashboardProps) => {
   // Calculate stats
   const totalBuses = buses.length;
   let expiredCount = 0;
@@ -28,7 +29,7 @@ export const Dashboard = ({ buses, onEditBus, onCheckExpiries, isSuperAdmin = tr
     (['trafik', 'kasko', 'koltuk'] as const).forEach((policyKey) => {
       const policy = bus.policies[policyKey];
       if (policy) {
-        const status = getPolicyStatus(policy.endDate);
+        const status = getPolicyStatus(policy.endDate, soonThreshold);
         const days = getDaysRemaining(policy.endDate);
 
         if (status === 'expired') expiredCount++;
@@ -108,7 +109,7 @@ export const Dashboard = ({ buses, onEditBus, onCheckExpiries, isSuperAdmin = tr
             <AlertTriangle size={24} />
           </div>
           <div className="metric-info">
-            <span className="metric-label">{SOON_THRESHOLD_DAYS} Gün İçinde Biten</span>
+            <span className="metric-label">{soonThreshold} Gün İçinde Biten</span>
             <span className="metric-value">{soonCount}</span>
           </div>
         </div>
@@ -198,13 +199,13 @@ export const Dashboard = ({ buses, onEditBus, onCheckExpiries, isSuperAdmin = tr
             <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-start' }}>
               <span className="status-badge soon" style={{ padding: '0.2rem', width: '8px', height: '8px', flexShrink: 0, marginTop: '5px' }}></span>
               <div>
-                <strong style={{ color: 'var(--text-primary)' }}>Sarı / Turuncu:</strong> Bitişine {SOON_THRESHOLD_DAYS} gün veya daha az kalan poliçeler.
+                <strong style={{ color: 'var(--text-primary)' }}>Sarı / Turuncu:</strong> Bitişine {soonThreshold} gün veya daha az kalan poliçeler.
               </div>
             </div>
             <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-start' }}>
               <span className="status-badge active" style={{ padding: '0.2rem', width: '8px', height: '8px', flexShrink: 0, marginTop: '5px' }}></span>
               <div>
-                <strong style={{ color: 'var(--text-primary)' }}>Yeşil:</strong> {SOON_THRESHOLD_DAYS} günden fazla süresi olan güvenli poliçeler.
+                <strong style={{ color: 'var(--text-primary)' }}>Yeşil:</strong> {soonThreshold} günden fazla süresi olan güvenli poliçeler.
               </div>
             </div>
             <hr style={{ borderColor: 'var(--border-color)', margin: '0.5rem 0' }} />

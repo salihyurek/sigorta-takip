@@ -109,7 +109,7 @@ namespace SigortaTakip.Controllers
                 bool wrongOld = false;
                 string? userEmail = null;
 
-                Db.Update(data =>
+                var ok = Db.Update(data =>
                 {
                     var user = data.Users.FirstOrDefault(u => string.Equals(u.Email, CurrentUserEmail, StringComparison.OrdinalIgnoreCase));
                     if (user == null) { notFound = true; return false; }
@@ -122,6 +122,7 @@ namespace SigortaTakip.Controllers
 
                 if (notFound) return NotFound(new { error = "Kullanıcı bulunamadı." });
                 if (wrongOld) return BadRequest(new { error = "Eski şifreniz hatalı!" });
+                if (!ok) return StatusCode(500, new { error = "Şifre güncellenirken hata oluştu." });
 
                 // Invalidate the user's other sessions but keep the current one alive,
                 // so changing your own password doesn't immediately log you out.
@@ -176,33 +177,44 @@ namespace SigortaTakip.Controllers
                         var expiry = DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeMilliseconds();
 
                         // Persist only the hash; the raw token travels in the email link.
-                        Db.Update(d =>
+                        bool tokenSet = false;
+                        var persisted = Db.Update(d =>
                         {
                             var u = d.Users.FirstOrDefault(x => string.Equals(x.Email, user.Email, StringComparison.OrdinalIgnoreCase));
                             if (u == null) return false;
                             u.ResetToken = AuthService.HashToken(resetToken);
                             u.ResetTokenExpiry = expiry;
+                            tokenSet = true;
                             return true;
                         });
 
-                        string? origin = Request.Headers["Origin"];
-                        if (string.IsNullOrEmpty(origin))
+                        // No point emailing a token we failed to persist (reset would just fail).
+                        // tokenSet => the user was found and mutated; persisted => the write succeeded.
+                        if (!(tokenSet && persisted))
                         {
-                            origin = Request.Headers["Referer"];
-                            if (!string.IsNullOrEmpty(origin))
+                            Console.WriteLine("[Auth] Could not persist reset token; skipping email.");
+                        }
+                        else
+                        {
+                            string? origin = Request.Headers["Origin"];
+                            if (string.IsNullOrEmpty(origin))
                             {
-                                var uri = new Uri(origin);
-                                origin = $"{uri.Scheme}://{uri.Authority}";
+                                origin = Request.Headers["Referer"];
+                                if (!string.IsNullOrEmpty(origin))
+                                {
+                                    var uri = new Uri(origin);
+                                    origin = $"{uri.Scheme}://{uri.Authority}";
+                                }
                             }
-                        }
 
-                        try
-                        {
-                            await _mailService.SendPasswordResetEmailAsync(user.Email, resetToken, settings, origin);
-                        }
-                        catch (Exception mailEx)
-                        {
-                            Console.WriteLine($"[Auth] Failed to send reset email: {mailEx.Message}");
+                            try
+                            {
+                                await _mailService.SendPasswordResetEmailAsync(user.Email, resetToken, settings, origin);
+                            }
+                            catch (Exception mailEx)
+                            {
+                                Console.WriteLine($"[Auth] Failed to send reset email: {mailEx.Message}");
+                            }
                         }
                     }
                 }
@@ -245,7 +257,7 @@ namespace SigortaTakip.Controllers
                 bool invalid = false;
                 string? userEmail = null;
 
-                Db.Update(data =>
+                var ok = Db.Update(data =>
                 {
                     var user = data.Users.FirstOrDefault(u =>
                         u.ResetToken == hashedToken &&
@@ -265,6 +277,7 @@ namespace SigortaTakip.Controllers
                 {
                     return BadRequest(new { error = "Geçersiz veya süresi dolmuş sıfırlama bağlantısı!" });
                 }
+                if (!ok) return StatusCode(500, new { error = "Şifre yenilenirken hata oluştu." });
 
                 // Invalidate all other sessions for this user
                 Auth.DeleteAllSessionsForUser(userEmail!);

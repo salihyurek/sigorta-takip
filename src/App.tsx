@@ -6,6 +6,7 @@ import { BusForm } from './components/BusForm';
 import { Settings } from './components/Settings';
 import { Login } from './components/Login';
 import { ResetPassword } from './components/ResetPassword';
+import { SOON_THRESHOLD_DAYS } from './utils/dateHelpers';
 import { ShieldCheck, Plus, Settings as SettingsIcon, LayoutDashboard, Bus as BusIcon, X, LogOut } from 'lucide-react';
 
 interface Toast {
@@ -67,6 +68,8 @@ export default function App() {
 
   const [buses, setBuses] = useState<Bus[]>([]);
   const [settings, setSettings] = useState<SMTPConfig | null>(null);
+  // "Expiring soon" window; synced from the backend's REMINDER_DAYS via /api/config.
+  const [soonThreshold, setSoonThreshold] = useState<number>(SOON_THRESHOLD_DAYS);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'buses' | 'settings'>('dashboard');
   
   // Modal State
@@ -206,6 +209,19 @@ export default function App() {
     window.addEventListener('storage', handleStorageChange);
     return () => window.removeEventListener('storage', handleStorageChange);
   }, [handleLogoutClient]);
+
+  // Sync the "expiring soon" window from the backend (REMINDER_DAYS) so the UI's
+  // colours/labels match when reminder emails actually start. Anonymous endpoint.
+  useEffect(() => {
+    fetch('/api/config')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && typeof data.soonThresholdDays === 'number' && data.soonThresholdDays > 0) {
+          setSoonThreshold(data.soonThresholdDays);
+        }
+      })
+      .catch(() => { /* keep the default */ });
+  }, []);
 
   // Login handler
   const handleLogin = async (email: string, password: string, remember: boolean) => {
@@ -574,6 +590,7 @@ export default function App() {
             onEditBus={openEditModal}
             onCheckExpiries={handleCheckExpiries}
             isSuperAdmin={isSuperAdmin}
+            soonThreshold={soonThreshold}
           />
         )}
         
@@ -583,6 +600,7 @@ export default function App() {
             onEditBus={openEditModal}
             onDeleteBus={handleDeleteBus}
             isSuperAdmin={isSuperAdmin}
+            soonThreshold={soonThreshold}
           />
         )}
         

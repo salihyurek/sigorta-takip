@@ -32,6 +32,13 @@ namespace SigortaTakip.Services
             Console.WriteLine($"[Scheduler] Reminder thresholds (days before expiry): {string.Join(", ", _reminderDays)}");
         }
 
+        /// <summary>The configured reminder thresholds (days before expiry), e.g. 15,7,1,0.</summary>
+        public int[] ReminderDays => _reminderDays;
+
+        /// <summary>The widest threshold = the day the first reminder goes out. The UI uses
+        /// this for its "expiring soon" window so the colour matches when emails start.</summary>
+        public int SoonThresholdDays => _reminderDays.Length > 0 ? _reminderDays.Max() : 15;
+
         // Thresholds at which we send a warning, e.g. 15/7/1 days before and on expiry (0).
         // 0 is always included so the expiry day itself is never missed.
         internal static int[] ParseReminderDays(string? raw)
@@ -158,10 +165,8 @@ namespace SigortaTakip.Services
                     return 0;
                 }
 
-                var todayStr = _time.TodayString;
-                int emailsSent = 0;
-                bool hasChanges = false;
-
+                // Pass 1: figure out which policies need an email (pure, no I/O, no mutation).
+                var pending = new List<(Bus bus, string key, string endDate, int days, int bucket)>();
                 foreach (var bus in data.Buses)
                 {
                     if (bus.Policies == null) continue;
@@ -184,25 +189,60 @@ namespace SigortaTakip.Services
                             continue;
                         }
 
+                        pending.Add((bus, policyKey, policy.EndDate, days.Value, bucket.Value));
+                    }
+                }
+
+                if (pending.Count == 0)
+                {
+                    Console.WriteLine("[Scheduler] Check complete. Sent 0 email(s).");
+                    return 0;
+                }
+
+                var todayStr = _time.TodayString;
+                int emailsSent = 0;
+                var sent = new List<(string busId, string key, string endDate, int bucket)>();
+
+                // Pass 2: send over a single reused SMTP connection.
+                using (var client = _mailService.CreateSmtpClient(settings))
+                {
+                    foreach (var item in pending)
+                    {
                         try
                         {
-                            await _mailService.SendPolicyReminderAsync(bus, policyKey, policy.EndDate, days.Value, settings);
-                            policy.LastNotifiedThreshold = bucket.Value;
-                            policy.LastEmailedDate = todayStr;
+                            await _mailService.SendPolicyReminderAsync(client, item.bus, item.key, item.endDate, item.days, settings);
+                            sent.Add((item.bus.Id, item.key, item.endDate, item.bucket));
                             emailsSent++;
-                            hasChanges = true;
-                            Console.WriteLine($"[Scheduler] Sent reminder for {bus.Plate} - {policyKey} ({days} gün).");
+                            Console.WriteLine($"[Scheduler] Sent reminder for {item.bus.Plate} - {item.key} ({item.days} gün).");
                         }
                         catch (Exception err)
                         {
-                            Console.WriteLine($"[Scheduler] Failed to email {bus.Plate} - {policyKey}: {err.Message}");
+                            Console.WriteLine($"[Scheduler] Failed to email {item.bus.Plate} - {item.key}: {err.Message}");
                         }
                     }
                 }
 
-                if (hasChanges)
+                // Pass 3: persist notification timestamps against FRESH data (re-read inside
+                // Update) so we don't clobber any bus/settings change an admin made while the
+                // emails were being sent. Only stamp a policy whose end date is still the one
+                // we notified for — if it was renewed meanwhile, its notifications were reset.
+                if (sent.Count > 0)
                 {
-                    _dbService.WriteDb(data);
+                    _dbService.Update(fresh =>
+                    {
+                        foreach (var s in sent)
+                        {
+                            var b = fresh.Buses.FirstOrDefault(x => x.Id == s.busId);
+                            if (b?.Policies != null
+                                && b.Policies.TryGetValue(s.key, out var p) && p != null
+                                && p.EndDate == s.endDate)
+                            {
+                                p.LastNotifiedThreshold = s.bucket;
+                                p.LastEmailedDate = todayStr;
+                            }
+                        }
+                        return true;
+                    });
                     Console.WriteLine("[Scheduler] Database updated with notification timestamps.");
                 }
 

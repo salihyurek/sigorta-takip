@@ -77,7 +77,7 @@ namespace SigortaTakip.Controllers
 
                 // Uniqueness check + insert in one atomic step so two concurrent creates
                 // can't both slip past the duplicate-plate check.
-                Db.Update(data =>
+                var ok = Db.Update(data =>
                 {
                     if (data.Buses.Any(b => NormalizePlate(b.Plate) == normalizedPlate))
                     {
@@ -87,7 +87,7 @@ namespace SigortaTakip.Controllers
 
                     newBus = new Bus
                     {
-                        Id = "bus-" + DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                        Id = "bus-" + Guid.NewGuid().ToString("n"),
                         Plate = req.Plate.ToUpperInvariant().Trim(),
                         Brand = req.Brand.Trim(),
                         Operator = req.Operator.Trim(),
@@ -101,6 +101,7 @@ namespace SigortaTakip.Controllers
                 });
 
                 if (error != null) return BadRequest(new { error });
+                if (!ok) return StatusCode(500, new { error = "Araç kaydedilemedi." });
                 return StatusCode(201, newBus);
             }
             catch (Exception ex)
@@ -141,7 +142,7 @@ namespace SigortaTakip.Controllers
                 int importedCount = 0;
                 int updatedCount = 0;
 
-                Db.Update(data =>
+                var ok = Db.Update(data =>
                 {
                     foreach (var busReq in req)
                     {
@@ -170,7 +171,7 @@ namespace SigortaTakip.Controllers
                         {
                             data.Buses.Insert(0, new Bus
                             {
-                                Id = "bus-" + (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + importedCount),
+                                Id = "bus-" + Guid.NewGuid().ToString("n"),
                                 Plate = busReq.Plate.ToUpperInvariant().Trim(),
                                 Brand = busReq.Brand.Trim(),
                                 Operator = busReq.Operator.Trim(),
@@ -182,6 +183,7 @@ namespace SigortaTakip.Controllers
                     return true;
                 });
 
+                if (!ok) return StatusCode(500, new { error = "Araçlar kaydedilemedi." });
                 return Ok(new { success = true, importedCount, updatedCount });
             }
             catch (Exception ex)
@@ -207,7 +209,7 @@ namespace SigortaTakip.Controllers
                 string? error = null;
                 Bus? updatedBus = null;
 
-                Db.Update(data =>
+                var ok = Db.Update(data =>
                 {
                     var busIndex = data.Buses.FindIndex(b => b.Id == id);
                     if (busIndex == -1) { notFound = true; return false; }
@@ -237,6 +239,7 @@ namespace SigortaTakip.Controllers
 
                 if (notFound) return NotFound(new { error = "Araç bulunamadı." });
                 if (error != null) return BadRequest(new { error });
+                if (!ok) return StatusCode(500, new { error = "Araç güncellenemedi." });
                 return Ok(updatedBus);
             }
             catch (Exception ex)
@@ -255,7 +258,7 @@ namespace SigortaTakip.Controllers
             try
             {
                 bool found = false;
-                Db.Update(data =>
+                var ok = Db.Update(data =>
                 {
                     var initialLength = data.Buses.Count;
                     data.Buses = data.Buses.Where(b => b.Id != id).ToList();
@@ -264,6 +267,7 @@ namespace SigortaTakip.Controllers
                 });
 
                 if (!found) return NotFound(new { error = "Araç bulunamadı." });
+                if (!ok) return StatusCode(500, new { error = "Araç silinemedi." });
                 return Ok(new { success = true, message = "Araç silindi." });
             }
             catch (Exception ex)

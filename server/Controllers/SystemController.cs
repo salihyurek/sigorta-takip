@@ -67,7 +67,7 @@ namespace SigortaTakip.Controllers
                     }
                 }
 
-                Db.Update(data =>
+                var ok = Db.Update(data =>
                 {
                     var restoredSettings = req.Settings ?? data.Settings;
                     // Backups never contain the real SMTP password (it's masked on export),
@@ -83,6 +83,7 @@ namespace SigortaTakip.Controllers
                     return true;
                 });
 
+                if (!ok) return StatusCode(500, new { error = "Geri yükleme başarısız oldu." });
                 return Ok(new { success = true, message = "Veritabanı başarıyla geri yüklendi" });
             }
             catch (Exception ex)
@@ -97,6 +98,19 @@ namespace SigortaTakip.Controllers
         public IActionResult Health()
         {
             return Ok(new { status = "ok", timestamp = DateTime.UtcNow });
+        }
+
+        // Non-sensitive client config so the UI's "expiring soon" window matches the
+        // backend REMINDER_DAYS instead of a hard-coded 15. Anonymous on purpose.
+        [HttpGet("/api/config")]
+        [Microsoft.AspNetCore.RateLimiting.DisableRateLimiting]
+        public IActionResult Config()
+        {
+            return Ok(new
+            {
+                reminderDays = _schedulerService.ReminderDays,
+                soonThresholdDays = _schedulerService.SoonThresholdDays
+            });
         }
     }
 }

@@ -83,7 +83,7 @@ namespace SigortaTakip.Controllers
                 User? newUser = null;
 
                 // Duplicate-email check + insert atomically.
-                Db.Update(data =>
+                var ok = Db.Update(data =>
                 {
                     if (data.Users.Any(u => string.Equals(u.Email.Trim(), req.Email.Trim(), StringComparison.OrdinalIgnoreCase)))
                     {
@@ -93,7 +93,7 @@ namespace SigortaTakip.Controllers
 
                     newUser = new User
                     {
-                        Id = "user-" + DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                        Id = "user-" + Guid.NewGuid().ToString("n"),
                         Email = req.Email.ToLowerInvariant().Trim(),
                         Password = Auth.HashPassword(req.Password),
                         Role = role,
@@ -106,6 +106,7 @@ namespace SigortaTakip.Controllers
                 });
 
                 if (duplicate) return BadRequest(new { error = "Bu e-posta adresi zaten yetkilendirilmiş!" });
+                if (!ok) return StatusCode(500, new { error = "Kullanıcı kaydedilemedi." });
                 return StatusCode(201, new { id = newUser!.Id, email = newUser.Email, role = newUser.Role });
             }
             catch (Exception ex)
@@ -148,7 +149,7 @@ namespace SigortaTakip.Controllers
                 bool notFound = false;
                 string? affectedEmail = null;
 
-                Db.Update(data =>
+                var ok = Db.Update(data =>
                 {
                     var user = data.Users.FirstOrDefault(u => string.Equals(u.Email, targetEmail, StringComparison.OrdinalIgnoreCase));
                     if (user == null) { notFound = true; return false; }
@@ -159,6 +160,7 @@ namespace SigortaTakip.Controllers
                 });
 
                 if (notFound) return NotFound(new { error = "Kullanıcı bulunamadı." });
+                if (!ok) return StatusCode(500, new { error = "Yetki güncellenemedi." });
 
                 // Force the affected user to re-authenticate so the new role takes effect.
                 Auth.DeleteAllSessionsForUser(affectedEmail!);
@@ -196,7 +198,7 @@ namespace SigortaTakip.Controllers
 
                 // Find + last-superadmin check + remove atomically, so a concurrent
                 // delete/demote can't drop the system below one superadmin.
-                Db.Update(data =>
+                var ok = Db.Update(data =>
                 {
                     var userIndex = data.Users.FindIndex(u => string.Equals(u.Email, targetEmail, StringComparison.OrdinalIgnoreCase));
                     if (userIndex == -1) { notFound = true; return false; }
@@ -215,6 +217,7 @@ namespace SigortaTakip.Controllers
 
                 if (notFound) return NotFound(new { error = "Kullanıcı bulunamadı." });
                 if (lastAdmin) return BadRequest(new { error = "Sistemde en az bir yönetici bulunmalıdır." });
+                if (!ok) return StatusCode(500, new { error = "Kullanıcı silinemedi." });
 
                 Auth.DeleteAllSessionsForUser(targetEmail);
 

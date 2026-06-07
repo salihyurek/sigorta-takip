@@ -53,3 +53,11 @@ test('getPolicyStatus "soon" boundary tracks SOON_THRESHOLD_DAYS', () => {
   assert.equal(getPolicyStatus(localDateString(SOON_THRESHOLD_DAYS)), 'soon');
   assert.equal(getPolicyStatus(localDateString(SOON_THRESHOLD_DAYS + 1)), 'active');
 });
+
+test('getPolicyStatus respects an explicit soonThreshold argument', () => {
+  // With a 30-day window (from /api/config) day 20 is "soon"; with the default 15
+  // it would be "active". This is how the UI stays in sync with backend REMINDER_DAYS.
+  assert.equal(getPolicyStatus(localDateString(20), 30), 'soon');
+  assert.equal(getPolicyStatus(localDateString(31), 30), 'active');
+  assert.equal(getPolicyStatus(localDateString(20)), 'active');
+});

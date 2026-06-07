@@ -10,7 +10,9 @@ namespace SigortaTakip.Services
 {
     public class MailService
     {
-        private SmtpClient CreateSmtpClient(Settings settings)
+        // Internal so the scheduler can create one client and reuse it across a batch of
+        // reminder emails instead of opening a fresh connection per policy.
+        internal SmtpClient CreateSmtpClient(Settings settings)
         {
             if (string.IsNullOrWhiteSpace(settings.SmtpHost) ||
                 string.IsNullOrWhiteSpace(settings.SmtpUser) ||
@@ -214,7 +216,16 @@ namespace SigortaTakip.Services
     </html>";
         }
 
+        // Convenience overload: sends a single reminder with its own short-lived client.
         public async Task SendPolicyReminderAsync(Bus bus, string policyType, string endDate, int daysRemaining, Settings settings)
+        {
+            using var client = CreateSmtpClient(settings);
+            await SendPolicyReminderAsync(client, bus, policyType, endDate, daysRemaining, settings);
+        }
+
+        // Sends a reminder over a caller-supplied client (the caller owns/disposes it),
+        // so a batch run can reuse one SMTP connection.
+        internal async Task SendPolicyReminderAsync(SmtpClient client, Bus bus, string policyType, string endDate, int daysRemaining, Settings settings)
         {
             var policyNames = new Dictionary<string, string>
             {
@@ -253,7 +264,6 @@ namespace SigortaTakip.Services
 
             var htmlContent = GenerateEmailTemplate(title, message, bus, policyType, endDate, remainingText);
 
-            using var client = CreateSmtpClient(settings);
             var mailMessage = new MailMessage
             {
                 From = new MailAddress(settings.SenderEmail, !string.IsNullOrWhiteSpace(settings.SenderName) ? settings.SenderName : "Sigorta Takip"),

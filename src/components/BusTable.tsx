@@ -10,9 +10,10 @@ interface BusTableProps {
   onEditBus: (bus: Bus) => void;
   onDeleteBus: (id: string) => void;
   isSuperAdmin?: boolean;
+  soonThreshold?: number;
 }
 
-export const BusTable = ({ buses, onEditBus, onDeleteBus, isSuperAdmin = true }: BusTableProps) => {
+export const BusTable = ({ buses, onEditBus, onDeleteBus, isSuperAdmin = true, soonThreshold = SOON_THRESHOLD_DAYS }: BusTableProps) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [sortBy, setSortBy] = useState<string>('plate');
@@ -95,9 +96,9 @@ export const BusTable = ({ buses, onEditBus, onDeleteBus, isSuperAdmin = true }:
     if (statusFilter === 'all') return true;
 
     const statuses = [
-      getPolicyStatus(bus.policies?.trafik?.endDate || ''),
-      getPolicyStatus(bus.policies?.kasko?.endDate || ''),
-      getPolicyStatus(bus.policies?.koltuk?.endDate || '')
+      getPolicyStatus(bus.policies?.trafik?.endDate || '', soonThreshold),
+      getPolicyStatus(bus.policies?.kasko?.endDate || '', soonThreshold),
+      getPolicyStatus(bus.policies?.koltuk?.endDate || '', soonThreshold)
     ];
 
     if (statusFilter === 'expired') return statuses.includes('expired');
@@ -142,7 +143,7 @@ export const BusTable = ({ buses, onEditBus, onDeleteBus, isSuperAdmin = true }:
 
   // Render Policy Cell
   const renderPolicyCell = (endDate: string) => {
-    const status = getPolicyStatus(endDate);
+    const status = getPolicyStatus(endDate, soonThreshold);
     const days = getDaysRemaining(endDate);
     const formatted = formatDate(endDate);
 
@@ -211,7 +212,7 @@ export const BusTable = ({ buses, onEditBus, onDeleteBus, isSuperAdmin = true }:
               <option value="all">Tüm Durumlar</option>
               <option value="expired">Günü Geçenler var</option>
               <option value="today">Bugün Bitenler var</option>
-              <option value="soon">{SOON_THRESHOLD_DAYS} Gün Kalanlar var</option>
+              <option value="soon">{soonThreshold} Gün Kalanlar var</option>
               <option value="active">Tümü Güvenli (Aktif)</option>
             </select>
           </div>

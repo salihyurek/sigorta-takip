@@ -43,15 +43,20 @@ export function getDaysRemaining(endDateStr: string): number {
   return diffDays;
 }
 
-// Classify policy status based on days remaining
-export function getPolicyStatus(endDateStr: string): 'expired' | 'today' | 'soon' | 'active' {
+// Classify policy status based on days remaining. The "soon" window defaults to
+// SOON_THRESHOLD_DAYS but callers can pass the value fetched from /api/config so the
+// UI matches the backend's REMINDER_DAYS.
+export function getPolicyStatus(
+  endDateStr: string,
+  soonThreshold: number = SOON_THRESHOLD_DAYS
+): 'expired' | 'today' | 'soon' | 'active' {
   if (!endDateStr) return 'expired';
-  
+
   const days = getDaysRemaining(endDateStr);
-  
+
   if (days < 0) return 'expired';
   if (days === 0) return 'today';
-  if (days <= SOON_THRESHOLD_DAYS) return 'soon';
+  if (days <= soonThreshold) return 'soon';
   return 'active';
 }
 
