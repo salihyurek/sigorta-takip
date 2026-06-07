@@ -1,12 +1,14 @@
 import { useState, useEffect, useCallback, type FormEvent, type ChangeEvent } from 'react';
 import type { BackupData, Bus, SMTPConfig } from '../types';
 import { Mail, Shield, Save, RefreshCw, Download, Upload, AlertCircle, CheckCircle, UserPlus, Key, Trash2, ShieldAlert } from 'lucide-react';
+import { exportBusesToExcel, importBusesFromExcel } from '../utils/excelHelpers';
 
 interface SettingsProps {
   settings: SMTPConfig;
   onSaveSettings: (settings: SMTPConfig) => Promise<void>;
   onTestEmail: (settings: SMTPConfig) => Promise<void>;
   onRestoreDb: (data: BackupData) => Promise<void>;
+  onImportExcel: (importedBuses: Omit<Bus, 'id'>[]) => Promise<void>;
   busesData: Bus[];
   currentUserEmail: string;
   currentUserRole: string;
@@ -32,6 +34,7 @@ export const Settings = ({
   onSaveSettings,
   onTestEmail,
   onRestoreDb,
+  onImportExcel,
   busesData,
   currentUserEmail,
   currentUserRole,
@@ -303,6 +306,40 @@ export const Settings = ({
       }
     };
     reader.readAsText(file);
+  };
+
+  // Excel File Upload States & Handlers
+  const [excelError, setExcelError] = useState<string | null>(null);
+  const [excelSuccess, setExcelSuccess] = useState<string | null>(null);
+
+  const handleExcelExport = () => {
+    if (!isSuperAdmin) return;
+    try {
+      exportBusesToExcel(busesData);
+    } catch (err: unknown) {
+      alert(getErrorMessage(err, 'Excel aktarımı başarısız oldu.'));
+    }
+  };
+
+  const handleExcelImport = async (e: ChangeEvent<HTMLInputElement>) => {
+    if (!isSuperAdmin) return;
+    setExcelError(null);
+    setExcelSuccess(null);
+
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const parsedBuses = await importBusesFromExcel(file);
+      if (window.confirm(`${parsedBuses.length} adet araç verisi Excel'den içe aktarılacak (mevcut plakalı araçlar güncellenecek, yenileri eklenecektir). Onaylıyor musunuz?`)) {
+        await onImportExcel(parsedBuses);
+        setExcelSuccess('Excel verileri başarıyla içe aktarıldı!');
+        e.target.value = ''; // Reset input
+      }
+    } catch (err: unknown) {
+      setExcelError(getErrorMessage(err, 'Excel içe aktarma hatası.'));
+      e.target.value = ''; // Reset input
+    }
   };
 
   // 1. View-only (Viewer) layout: Displays only password change form card
@@ -696,6 +733,42 @@ export const Settings = ({
         {restoreSuccess && (
           <div style={{ padding: '0.5rem 0.75rem', background: 'var(--success-bg)', border: '1px solid var(--success-border)', color: 'var(--success)', borderRadius: 'var(--radius-sm)', fontSize: '0.8rem' }}>
             {restoreSuccess}
+          </div>
+        )}
+
+        <hr style={{ borderColor: 'var(--border-color)' }} />
+
+        {/* Excel Export Button */}
+        <div>
+          <button className="btn-secondary" onClick={handleExcelExport} style={{ width: '100%', justifyContent: 'center', background: 'rgba(92, 138, 94, 0.05)', color: 'var(--success)', borderColor: 'var(--success-border)' }}>
+            <Download size={16} />
+            Excel İndir (.xlsx)
+          </button>
+        </div>
+
+        {/* Excel Import Button */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          <label className="btn-secondary" style={{ width: '100%', justifyContent: 'center', cursor: 'pointer', background: 'rgba(92, 138, 94, 0.05)', color: 'var(--success)', borderColor: 'var(--success-border)' }}>
+            <Upload size={16} />
+            Excel'den Araç Yükle
+            <input
+              type="file"
+              accept=".xlsx, .xls"
+              style={{ display: 'none' }}
+              onChange={handleExcelImport}
+            />
+          </label>
+        </div>
+
+        {excelError && (
+          <div style={{ padding: '0.5rem 0.75rem', background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', color: 'var(--danger)', borderRadius: 'var(--radius-sm)', fontSize: '0.8rem' }}>
+            {excelError}
+          </div>
+        )}
+
+        {excelSuccess && (
+          <div style={{ padding: '0.5rem 0.75rem', background: 'var(--success-bg)', border: '1px solid var(--success-border)', color: 'var(--success)', borderRadius: 'var(--radius-sm)', fontSize: '0.8rem' }}>
+            {excelSuccess}
           </div>
         )}
       </div>

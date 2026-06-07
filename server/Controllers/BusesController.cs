@@ -120,6 +120,108 @@ namespace SigortaTakip.Controllers
             }
         }
 
+        [HttpPost("bulk-import")]
+        public IActionResult BulkImport([FromBody] List<CreateBusRequest> req)
+        {
+            var adminCheck = CheckSuperAdmin();
+            if (adminCheck != null) return adminCheck;
+
+            try
+            {
+                if (req == null || req.Count == 0)
+                {
+                    return BadRequest(new { error = "İçe aktarılacak araç verisi bulunamadı." });
+                }
+
+                // Check dates are valid first
+                for (int i = 0; i < req.Count; i++)
+                {
+                    var busReq = req[i];
+                    if (string.IsNullOrWhiteSpace(busReq.Plate)) continue;
+
+                    foreach (var key in new[] { "trafik", "kasko", "koltuk" })
+                    {
+                        if (!busReq.Policies.TryGetValue(key, out var policy) || 
+                            policy == null || 
+                            !IsValidDate(policy.StartDate) || 
+                            !IsValidDate(policy.EndDate))
+                        {
+                            return BadRequest(new { error = $"Satır {i + 2} ({busReq.Plate}): Geçersiz tarih formatı: {key}" });
+                        }
+                    }
+                }
+
+                var data = Db.ReadDb();
+                int importedCount = 0;
+                int updatedCount = 0;
+
+                foreach (var busReq in req)
+                {
+                    if (string.IsNullOrWhiteSpace(busReq.Plate) || 
+                        string.IsNullOrWhiteSpace(busReq.Brand) || 
+                        string.IsNullOrWhiteSpace(busReq.Operator) || 
+                        busReq.Policies == null)
+                    {
+                        continue; // Skip invalid rows
+                    }
+
+                    // Normalize plate
+                    var normalizedPlate = Regex.Replace(busReq.Plate.ToUpperInvariant(), @"\s+", "").Trim();
+
+                    // Check if plate already exists
+                    var existingBusIndex = data.Buses.FindIndex(b => 
+                        Regex.Replace(b.Plate.ToUpperInvariant(), @"\s+", "").Trim() == normalizedPlate);
+
+                    var newPolicies = new Dictionary<string, Policy>();
+                    foreach (var key in new[] { "trafik", "kasko", "koltuk" })
+                    {
+                        if (busReq.Policies.TryGetValue(key, out var policy) && policy != null)
+                        {
+                            newPolicies[key] = new Policy
+                            {
+                                StartDate = policy.StartDate,
+                                EndDate = policy.EndDate,
+                                LastEmailedDate = (existingBusIndex != -1 && data.Buses[existingBusIndex].Policies.TryGetValue(key, out var op) && op != null && op.EndDate == policy.EndDate)
+                                    ? op.LastEmailedDate
+                                    : null
+                            };
+                        }
+                    }
+
+                    if (existingBusIndex != -1)
+                    {
+                        // Update existing bus
+                        var existingBus = data.Buses[existingBusIndex];
+                        existingBus.Brand = busReq.Brand.Trim();
+                        existingBus.Operator = busReq.Operator.Trim();
+                        existingBus.Policies = newPolicies;
+                        updatedCount++;
+                    }
+                    else
+                    {
+                        // Create new bus
+                        var newBus = new Bus
+                        {
+                            Id = "bus-" + (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + importedCount),
+                            Plate = busReq.Plate.ToUpperInvariant().Trim(),
+                            Brand = busReq.Brand.Trim(),
+                            Operator = busReq.Operator.Trim(),
+                            Policies = newPolicies
+                        };
+                        data.Buses.Insert(0, newBus);
+                        importedCount++;
+                    }
+                }
+
+                Db.WriteDb(data);
+                return Ok(new { success = true, importedCount, updatedCount });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = "Failed to bulk import buses", details = ex.Message });
+            }
+        }
+
         [HttpPut("{id}")]
         public IActionResult UpdateBus(string id, [FromBody] CreateBusRequest req)
         {

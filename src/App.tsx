@@ -384,6 +384,34 @@ export default function App() {
     }
   };
 
+  // Excel Import - Super Admin Only
+  const handleImportExcel = async (importedBuses: Omit<Bus, 'id'>[]) => {
+    if (!token) return;
+    try {
+      const res = await fetch('/api/buses/bulk-import', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(importedBuses)
+      });
+
+      await handleApiResponse(res);
+      const data = await safeJsonParse(res);
+      if (!res.ok) throw new Error(data.error || 'İçe aktarma işlemi başarısız oldu.');
+
+      addToast('success', `Excel verileri yüklendi: ${data.importedCount} yeni araç eklendi, ${data.updatedCount} araç güncellendi.`);
+      fetchBuses();
+    } catch (err: unknown) {
+      const message = getErrorMessage(err, 'İçe aktarma başarısız.');
+      if (message !== 'Unauthorized') {
+        addToast('error', message);
+      }
+      throw err;
+    }
+  };
+
   // Trigger Expiry Check manually
   const handleCheckExpiries = async () => {
     if (!token) return;
@@ -557,6 +585,7 @@ export default function App() {
             onSaveSettings={handleSaveSettings}
             onTestEmail={handleTestEmail}
             onRestoreDb={handleRestoreDb}
+            onImportExcel={handleImportExcel}
             busesData={buses}
             currentUserEmail={userEmail || ''}
             currentUserRole={role || ''}
