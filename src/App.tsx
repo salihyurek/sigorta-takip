@@ -394,7 +394,9 @@ export default function App() {
       const data = await safeJsonParse(res);
       if (!res.ok) throw new Error(data.error || 'Geri yükleme başarısız.');
 
-      addToast('success', 'Tüm yedek verileri başarıyla yüklendi.');
+      // The server's message can carry extra context (e.g. emails auto-disabled
+      // because the backup has no SMTP password).
+      addToast('success', data.message || 'Tüm yedek verileri başarıyla yüklendi.');
       fetchBuses();
       fetchSettings();
     } catch (err: unknown) {

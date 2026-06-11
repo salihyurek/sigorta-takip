@@ -137,7 +137,9 @@ export const BusForm = ({ bus, onSave, onClose }: BusFormProps) => {
         return;
       }
       
-      if (new Date(pair.end) < new Date(pair.start)) {
+      // Date inputs yield YYYY-MM-DD, which compares correctly as a plain string
+      // (same rule the backend uses).
+      if (pair.end < pair.start) {
         setError(`${pair.name} bitiş tarihi, başlangıç tarihinden önce olamaz.`);
         return;
       }

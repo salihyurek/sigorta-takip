@@ -141,6 +141,21 @@ export const importBusesFromExcel = (file: File): Promise<Omit<Bus, 'id'>[]> => 
           throw new Error('Gerekli sütunlar bulunamadı! Lütfen Plaka, Marka / Model ve Firma / Acente sütunlarının bulunduğundan emin olun.');
         }
 
+        // Report missing date columns up front with their names — otherwise every row
+        // would fail with a misleading "dates missing" error.
+        const dateColumns: Array<[string, number]> = [
+          ['Zorunlu Trafik Sigortası Başlangıç', idxTrafikStart],
+          ['Zorunlu Trafik Sigortası Bitiş', idxTrafikEnd],
+          ['Kasko Başlangıç', idxKaskoStart],
+          ['Kasko Bitiş', idxKaskoEnd],
+          ['Koltuk Sigortası Başlangıç', idxKoltukStart],
+          ['Koltuk Sigortası Bitiş', idxKoltukEnd]
+        ];
+        const missingCols = dateColumns.filter(([, idx]) => idx === -1).map(([name]) => name);
+        if (missingCols.length > 0) {
+          throw new Error(`Gerekli tarih sütunları bulunamadı: ${missingCols.join(', ')}`);
+        }
+
         for (let i = 1; i < rows.length; i++) {
           const row = rows[i];
           if (!row || row.length === 0) continue;
@@ -159,27 +174,37 @@ export const importBusesFromExcel = (file: File): Promise<Omit<Bus, 'id'>[]> => 
             throw new Error(`Satır ${i + 1}: Plakalı araç ("${rawPlate}") için Marka ve Firma / Acente alanları zorunludur.`);
           }
 
-          // Parse and format dates
-          const trafikStart = formatExcelDate(row[idxTrafikStart]);
-          const trafikEnd = formatExcelDate(row[idxTrafikEnd]);
-          const kaskoStart = formatExcelDate(row[idxKaskoStart]);
-          const kaskoEnd = formatExcelDate(row[idxKaskoEnd]);
-          const koltukStart = formatExcelDate(row[idxKoltukStart]);
-          const koltukEnd = formatExcelDate(row[idxKoltukEnd]);
-
-          // Validation check on date pairs
-          const validateDates = (name: string, start: string, end: string) => {
-            if (!start || !end) {
-              throw new Error(`Satır ${i + 1}: ${rawPlate} için ${name} tarihleri eksik.`);
+          // Parse and format dates, telling an empty cell apart from an unparseable one.
+          const parseDateCell = (name: string, label: string, raw: unknown): string => {
+            const rawStr = raw === undefined || raw === null ? '' : String(raw).trim();
+            if (!rawStr) {
+              throw new Error(`Satır ${i + 1}: ${rawPlate} için ${name} ${label} tarihi eksik.`);
             }
-            if (new Date(end) < new Date(start)) {
+            const formatted = formatExcelDate(raw);
+            if (!formatted) {
+              throw new Error(`Satır ${i + 1}: ${rawPlate} için ${name} ${label} tarihi anlaşılamadı ("${rawStr}"). Beklenen format: GG.AA.YYYY`);
+            }
+            return formatted;
+          };
+
+          const trafikStart = parseDateCell('Zorunlu Trafik Sigortası', 'başlangıç', row[idxTrafikStart]);
+          const trafikEnd = parseDateCell('Zorunlu Trafik Sigortası', 'bitiş', row[idxTrafikEnd]);
+          const kaskoStart = parseDateCell('Kasko', 'başlangıç', row[idxKaskoStart]);
+          const kaskoEnd = parseDateCell('Kasko', 'bitiş', row[idxKaskoEnd]);
+          const koltukStart = parseDateCell('Koltuk Sigortası', 'başlangıç', row[idxKoltukStart]);
+          const koltukEnd = parseDateCell('Koltuk Sigortası', 'bitiş', row[idxKoltukEnd]);
+
+          // YYYY-MM-DD strings compare correctly as plain strings (same rule the
+          // backend's ValidateBus uses), no Date parsing needed.
+          const validateOrder = (name: string, start: string, end: string) => {
+            if (end < start) {
               throw new Error(`Satır ${i + 1}: ${rawPlate} için ${name} bitiş tarihi başlangıç tarihinden önce olamaz.`);
             }
           };
 
-          validateDates('Zorunlu Trafik Sigortası', trafikStart, trafikEnd);
-          validateDates('Kasko', kaskoStart, kaskoEnd);
-          validateDates('Koltuk Sigortası', koltukStart, koltukEnd);
+          validateOrder('Zorunlu Trafik Sigortası', trafikStart, trafikEnd);
+          validateOrder('Kasko', kaskoStart, kaskoEnd);
+          validateOrder('Koltuk Sigortası', koltukStart, koltukEnd);
 
           buses.push({
             plate: rawPlate.toUpperCase(),

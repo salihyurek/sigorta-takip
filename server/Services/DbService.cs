@@ -213,7 +213,9 @@ namespace SigortaTakip.Services
             {
                 if (!Directory.Exists(_dbDir)) Directory.CreateDirectory(_dbDir);
 
-                var settings = data.Settings ?? new Settings();
+                // ??= so a null Settings is replaced on the object we serialize; a detached
+                // placeholder would silently drop the encrypted password from the file.
+                var settings = data.Settings ??= new Settings();
                 var plainPass = settings.SmtpPass;
                 try
                 {

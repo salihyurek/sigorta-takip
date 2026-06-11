@@ -28,7 +28,12 @@ namespace SigortaTakip.Helpers
                     val = val.Substring(1, val.Length - 2);
                 }
 
-                Environment.SetEnvironmentVariable(key, val);
+                // Real environment variables (e.g. set by the host/container) take
+                // precedence; a leftover .env file must not silently override them.
+                if (Environment.GetEnvironmentVariable(key) == null)
+                {
+                    Environment.SetEnvironmentVariable(key, val);
+                }
             }
         }
     }

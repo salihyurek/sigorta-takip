@@ -112,5 +112,63 @@ namespace SigortaTakip.Tests
         {
             Assert.Equal(expected, BaseApiController.IsValidEmail(email));
         }
+
+        [Theory]
+        [InlineData("34 ABC 123", "34ABC123")]
+        [InlineData("34abc123", "34ABC123")]
+        [InlineData("  34  ABC  123  ", "34ABC123")]
+        public void NormalizePlate_StripsWhitespaceAndUppercases(string input, string expected)
+        {
+            Assert.Equal(expected, BaseApiController.NormalizePlate(input));
+        }
+
+        private static Settings ValidSmtpSettings() => new()
+        {
+            SmtpHost = "smtp.example.com",
+            SmtpPort = 587,
+            SmtpUser = "user@example.com",
+            SenderEmail = "sender@example.com",
+            ReceiverEmail = "receiver@example.com",
+            EnableEmails = true
+        };
+
+        [Fact]
+        public void ValidateSmtpSettings_AcceptsValidEnabledConfig()
+        {
+            Assert.Null(BaseApiController.ValidateSmtpSettings(ValidSmtpSettings(), "secret"));
+        }
+
+        [Fact]
+        public void ValidateSmtpSettings_OnlyChecksPortWhenDisabled()
+        {
+            var s = new Settings { EnableEmails = false, SmtpPort = 587 };
+            Assert.Null(BaseApiController.ValidateSmtpSettings(s, ""));
+        }
+
+        [Theory]
+        [InlineData(0)]
+        [InlineData(-1)]
+        [InlineData(65536)]
+        public void ValidateSmtpSettings_RejectsInvalidPort(int port)
+        {
+            var s = ValidSmtpSettings();
+            s.SmtpPort = port;
+            Assert.NotNull(BaseApiController.ValidateSmtpSettings(s, "secret"));
+        }
+
+        [Fact]
+        public void ValidateSmtpSettings_RequiresFieldsWhenEnabled()
+        {
+            var s = ValidSmtpSettings();
+            s.SmtpHost = "";
+            Assert.NotNull(BaseApiController.ValidateSmtpSettings(s, "secret"));
+
+            s = ValidSmtpSettings();
+            Assert.NotNull(BaseApiController.ValidateSmtpSettings(s, "")); // missing password
+
+            s = ValidSmtpSettings();
+            s.ReceiverEmail = "not-an-email";
+            Assert.NotNull(BaseApiController.ValidateSmtpSettings(s, "secret"));
+        }
     }
 }

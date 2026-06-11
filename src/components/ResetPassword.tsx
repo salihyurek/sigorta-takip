@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { ShieldCheck, Lock, RefreshCw, CheckCircle, AlertCircle } from 'lucide-react';
+import { validatePassword } from '../utils/passwordValidation';
 
 interface ResetPasswordProps {
   token: string;
@@ -36,13 +37,9 @@ export const ResetPassword = ({ token, onResetComplete }: ResetPasswordProps) =>
       return;
     }
 
-    if (password.length < 8) {
-      setError('Şifreniz en az 8 karakter uzunluğunda olmalıdır.');
-      return;
-    }
-
-    if (!/[A-Z]/.test(password) || !/[a-z]/.test(password) || !/[0-9]/.test(password)) {
-      setError('Şifre en az bir büyük harf, bir küçük harf ve bir rakam içermelidir.');
+    const passwordError = validatePassword(password);
+    if (passwordError) {
+      setError(passwordError);
       return;
     }
 

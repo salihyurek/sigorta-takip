@@ -57,6 +57,9 @@ namespace SigortaTakip.Controllers
                 }
 
                 // Validate every restored bus so a malformed backup can't corrupt the db.
+                // Plates must also be unique within the backup, otherwise the restore would
+                // plant duplicates that CreateBus/UpdateBus carefully prevent.
+                var seenPlates = new HashSet<string>();
                 for (int i = 0; i < req.Buses.Count; i++)
                 {
                     var b = req.Buses[i];
@@ -65,7 +68,14 @@ namespace SigortaTakip.Controllers
                     {
                         return BadRequest(new { error = $"Yedekteki {i + 1}. araç geçersiz: {error}" });
                     }
+                    if (!seenPlates.Add(NormalizePlate(b.Plate)))
+                    {
+                        return BadRequest(new { error = $"Yedekte aynı plakaya sahip birden fazla araç var: {b.Plate}" });
+                    }
                 }
+
+                string? settingsError = null;
+                bool emailsDisabled = false;
 
                 var ok = Db.Update(data =>
                 {
@@ -77,14 +87,34 @@ namespace SigortaTakip.Controllers
                         restoredSettings.SmtpPass = data.Settings.SmtpPass;
                     }
 
+                    // On a fresh system there is no stored password either; disable emails
+                    // instead of rejecting the whole restore (the admin re-enables after
+                    // re-entering the SMTP password in Settings).
+                    if (restoredSettings.EnableEmails && string.IsNullOrWhiteSpace(restoredSettings.SmtpPass))
+                    {
+                        restoredSettings.EnableEmails = false;
+                        emailsDisabled = true;
+                    }
+
+                    settingsError = ValidateSmtpSettings(restoredSettings, restoredSettings.SmtpPass ?? "");
+                    if (settingsError != null) return false;
+
                     data.Settings = restoredSettings;
                     data.Buses = req.Buses;
                     // data.Users is left untouched to preserve existing accounts.
                     return true;
                 });
 
+                if (settingsError != null)
+                {
+                    return BadRequest(new { error = $"Yedekteki ayarlar geçersiz: {settingsError}" });
+                }
                 if (!ok) return StatusCode(500, new { error = "Geri yükleme başarısız oldu." });
-                return Ok(new { success = true, message = "Veritabanı başarıyla geri yüklendi" });
+
+                var message = emailsDisabled
+                    ? "Veritabanı geri yüklendi. SMTP şifresi yedekte bulunmadığı için e-posta bildirimleri kapatıldı; Ayarlar'dan şifreyi girip tekrar etkinleştirin."
+                    : "Veritabanı başarıyla geri yüklendi";
+                return Ok(new { success = true, message });
             }
             catch (Exception ex)
             {

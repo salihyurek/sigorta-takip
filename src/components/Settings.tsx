@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, type FormEvent, type ChangeEvent } fr
 import type { BackupData, Bus, SMTPConfig } from '../types';
 import { Mail, Shield, Save, RefreshCw, Download, Upload, AlertCircle, CheckCircle, UserPlus, Key, Trash2, ShieldAlert } from 'lucide-react';
 import { exportBusesToExcel, importBusesFromExcel } from '../utils/excelHelpers';
+import { validatePassword } from '../utils/passwordValidation';
 
 interface SettingsProps {
   settings: SMTPConfig | null;
@@ -261,13 +262,9 @@ export const Settings = ({
       return;
     }
 
-    if (newPassword.length < 8) {
-      setPassError('Yeni şifre en az 8 karakter uzunluğunda olmalıdır.');
-      return;
-    }
-
-    if (!/[A-Z]/.test(newPassword) || !/[a-z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
-      setPassError('Şifre en az bir büyük harf, bir küçük harf ve bir rakam içermelidir.');
+    const passwordError = validatePassword(newPassword);
+    if (passwordError) {
+      setPassError(passwordError);
       return;
     }
 
@@ -285,11 +282,13 @@ export const Settings = ({
     }
   };
 
-  // Download DB as Backup
+  // Download DB as Backup. Built from the SAVED settings (the `settings` prop),
+  // not the live form: form state may hold unsaved edits — including a freshly
+  // typed plaintext SMTP password, which must never end up in the backup file.
   const handleBackupDownload = () => {
     if (!isSuperAdmin) return;
     const backupData = {
-      settings: getFormSettings(),
+      settings: settings ? { ...settings, smtpPass: '' } : undefined,
       buses: busesData
     };
     

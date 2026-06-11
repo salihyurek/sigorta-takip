@@ -125,32 +125,6 @@ namespace SigortaTakip.Controllers
             }
         }
 
-        /// <summary>
-        /// Server-side guard so a bad config can't be persisted (the client's required=
-        /// attributes are advisory only). Port must be a valid TCP port; when email is
-        /// enabled the SMTP/sender/receiver fields must be present and well-formed.
-        /// </summary>
-        private static string? ValidateSmtpSettings(Settings s, string effectivePass)
-        {
-            if (s.SmtpPort < 1 || s.SmtpPort > 65535)
-            {
-                return "SMTP portu 1-65535 aralığında olmalıdır.";
-            }
-
-            if (!s.EnableEmails) return null; // Nothing else matters while disabled.
-
-            if (string.IsNullOrWhiteSpace(s.SmtpHost)) return "E-posta etkinken SMTP sunucusu zorunludur.";
-            if (string.IsNullOrWhiteSpace(s.SmtpUser)) return "E-posta etkinken SMTP kullanıcı adı zorunludur.";
-            if (string.IsNullOrWhiteSpace(effectivePass)) return "E-posta etkinken SMTP şifresi zorunludur.";
-            if (string.IsNullOrWhiteSpace(s.SenderEmail)) return "E-posta etkinken gönderen e-posta adresi zorunludur.";
-            if (string.IsNullOrWhiteSpace(s.ReceiverEmail)) return "E-posta etkinken alıcı e-posta adresi zorunludur.";
-
-            if (!IsValidEmail(s.SenderEmail)) return "Gönderen e-posta adresi geçersiz.";
-            if (!IsValidEmail(s.ReceiverEmail)) return "Alıcı e-posta adresi geçersiz.";
-
-            return null;
-        }
-
         [HttpPost("test-email")]
         public async Task<IActionResult> TestEmail([FromBody] Settings testSettings)
         {

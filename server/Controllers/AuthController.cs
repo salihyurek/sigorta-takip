@@ -26,6 +26,11 @@ namespace SigortaTakip.Controllers
             public string Password { get; set; } = "";
         }
 
+        // Compared against when the email is unknown so bcrypt always runs and the
+        // response time doesn't reveal whether an account exists (user enumeration).
+        private static readonly string DummyPasswordHash =
+            BCrypt.Net.BCrypt.HashPassword(Guid.NewGuid().ToString("n"), 10);
+
         [HttpPost("login")]
         [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting("auth")]
         public IActionResult Login([FromBody] LoginRequest req)
@@ -40,7 +45,8 @@ namespace SigortaTakip.Controllers
                 var data = Db.ReadDb();
                 var user = data.Users.FirstOrDefault(u => string.Equals(u.Email.Trim(), req.Email.Trim(), StringComparison.OrdinalIgnoreCase));
 
-                if (user == null || !Auth.ComparePassword(req.Password, user.Password))
+                var passwordOk = Auth.ComparePassword(req.Password, user?.Password ?? DummyPasswordHash);
+                if (user == null || !passwordOk)
                 {
                     return Unauthorized(new { error = "E-posta adresi veya şifre hatalı!" });
                 }
@@ -196,7 +202,16 @@ namespace SigortaTakip.Controllers
                         }
                         else
                         {
-                            string? origin = Request.Headers["Origin"];
+                            // The reset link must point at a trusted address. Prefer the configured
+                            // public URL: Origin/Referer are client-controlled, so trusting them lets
+                            // an attacker request a reset for a victim with a spoofed Origin and have
+                            // the victim's (genuine) email link leak the token to the attacker's domain.
+                            string? origin = Environment.GetEnvironmentVariable("APP_BASE_URL")?.TrimEnd('/');
+                            if (string.IsNullOrWhiteSpace(origin))
+                            {
+                                Console.WriteLine("[Auth] WARNING: APP_BASE_URL is not set; falling back to the request Origin header for the reset link. Set APP_BASE_URL in production.");
+                                origin = Request.Headers["Origin"];
+                            }
                             if (string.IsNullOrEmpty(origin))
                             {
                                 origin = Request.Headers["Referer"];

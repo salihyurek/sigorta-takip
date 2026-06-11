@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Mvc;
 using SigortaTakip.Models;
 using SigortaTakip.Services;
@@ -16,9 +15,6 @@ namespace SigortaTakip.Controllers
             : base(dbService, authService)
         {
         }
-
-        private static string NormalizePlate(string plate) =>
-            Regex.Replace(plate.ToUpperInvariant(), @"\s+", "").Trim();
 
         // Carry over the email-tracking fields only when the end date is unchanged,
         // so renewing a policy re-arms its reminder/expiry notifications.

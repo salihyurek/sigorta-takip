@@ -101,6 +101,37 @@ namespace SigortaTakip.Controllers
                 CultureInfo.InvariantCulture, DateTimeStyles.None, out _);
         }
 
+        /// <summary>Canonical plate form for uniqueness checks: uppercased, all whitespace removed.</summary>
+        internal static string NormalizePlate(string plate) =>
+            Regex.Replace(plate.ToUpperInvariant(), @"\s+", "").Trim();
+
+        /// <summary>
+        /// Server-side guard so a bad SMTP config can't be persisted (the client's
+        /// required= attributes are advisory only). Port must be a valid TCP port; when
+        /// email is enabled the SMTP/sender/receiver fields must be present and well-formed.
+        /// Shared by SaveSettings and Restore.
+        /// </summary>
+        internal static string? ValidateSmtpSettings(Settings s, string effectivePass)
+        {
+            if (s.SmtpPort < 1 || s.SmtpPort > 65535)
+            {
+                return "SMTP portu 1-65535 aralığında olmalıdır.";
+            }
+
+            if (!s.EnableEmails) return null; // Nothing else matters while disabled.
+
+            if (string.IsNullOrWhiteSpace(s.SmtpHost)) return "E-posta etkinken SMTP sunucusu zorunludur.";
+            if (string.IsNullOrWhiteSpace(s.SmtpUser)) return "E-posta etkinken SMTP kullanıcı adı zorunludur.";
+            if (string.IsNullOrWhiteSpace(effectivePass)) return "E-posta etkinken SMTP şifresi zorunludur.";
+            if (string.IsNullOrWhiteSpace(s.SenderEmail)) return "E-posta etkinken gönderen e-posta adresi zorunludur.";
+            if (string.IsNullOrWhiteSpace(s.ReceiverEmail)) return "E-posta etkinken alıcı e-posta adresi zorunludur.";
+
+            if (!IsValidEmail(s.SenderEmail)) return "Gönderen e-posta adresi geçersiz.";
+            if (!IsValidEmail(s.ReceiverEmail)) return "Alıcı e-posta adresi geçersiz.";
+
+            return null;
+        }
+
         /// <summary>
         /// Validates the core bus fields (lengths) and the three required policies'
         /// date formats / ordering. Returns an error message, or null if valid.
